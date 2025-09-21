@@ -690,6 +690,10 @@
         .leaflet-container {
           height: 100%;
         }
+        .leaflet-tile-container img {
+          image-rendering: auto;
+          transform: none !important;
+        }
         .label-container--selected {
           outline: 2px solid #000;
         }

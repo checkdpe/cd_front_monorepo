@@ -1,5 +1,6 @@
 import React from "react";
 import { MonDpe } from "@acme/mon-dpe";
+import { MonDpe2 } from "@acme/mon-dpe";
 
 export const App: React.FC = () => (
   <div className="energy-home" style={{ minHeight: '100vh', padding: 24 }}>

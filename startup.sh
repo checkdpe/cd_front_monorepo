@@ -13,11 +13,12 @@ echo "pnpm: $(pnpm -v)"
 
 pnpm install
 
-echo "Running stories (ladle)..."
-pnpm ladle || true
+echo "Running stories (ladle dev)..."
+pnpm ladle dev --port 6006 || true
 
 echo "Running tests..."
 pnpm test || true
 
 echo "Done. Start the app with:"
-echo "pnpm --filter @acme/landing dev"
+echo "pnpm --filter @acme/landing dev  # landing app"
+echo "pnpm --filter @acme/dashboard dev  # dashboard app"

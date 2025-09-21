@@ -9,6 +9,7 @@ import Slider, { Settings } from "react-slick";
 
 import financeUrl from "../assets/finance.svg";
 import locationUrl from "../assets/location.svg";
+import { fetchMapData } from "./api";
 
 export type MonDpeProps = {
   resultAutocomplete: any[];
@@ -50,6 +51,8 @@ export const MonDpe: FC<MonDpeProps> = ({
   const sliderRef = useRef<any>(null);
 
   const [tabMap, setTabMap] = useState("1");
+  const [fetchedMap, setFetchedMap] = useState<any[]>([]);
+  const [isFetchingMap, setIsFetchingMap] = useState(false);
 
   useEffect(() => {
     drawD3();
@@ -65,6 +68,42 @@ export const MonDpe: FC<MonDpeProps> = ({
       distributionRef.current.drawD3 && distributionRef.current.drawD3();
     }
   };
+
+  useEffect(() => {
+    const lat = _.get(dataHomeUploaded, "geo_data.lat");
+    const lng = _.get(dataHomeUploaded, "geo_data.lng");
+    const hasProvidedData = !_.isEmpty(searchDpesMap);
+
+    if (!lat || !lng || hasProvidedData) {
+      return;
+    }
+
+    let isCancelled = false;
+    const load = async () => {
+      try {
+        setIsFetchingMap(true);
+        const data = await fetchMapData<any[]>({ lat, lng });
+        if (!isCancelled) {
+          setFetchedMap(Array.isArray(data) ? data : []);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setFetchedMap([]);
+          // eslint-disable-next-line no-console
+          console.error("Failed to load map data", err);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsFetchingMap(false);
+        }
+      }
+    };
+
+    load();
+    return () => {
+      isCancelled = true;
+    };
+  }, [dataHomeUploaded, searchDpesMap]);
 
   const renderGPSItem = () => {
     if (isPendingSearchMap) {
@@ -169,8 +208,11 @@ export const MonDpe: FC<MonDpeProps> = ({
   };
 
   const renderMap = () => {
+    const resolvedSearchDpesMap = !_.isEmpty(searchDpesMap)
+      ? searchDpesMap
+      : fetchedMap;
     return (
-      <div className="map-wrapper">
+      <div className="map-wrapper" data-loading={isFetchingMap || undefined}>
         <MapContainer
           center={[
             _.get(dataHomeUploaded, "geo_data.lat"),
@@ -181,7 +223,7 @@ export const MonDpe: FC<MonDpeProps> = ({
           ref={mapRef}
         >
           <LeafLeftMapContent
-            searchDpesMap={searchDpesMap}
+            searchDpesMap={resolvedSearchDpesMap}
             selectedLabelId={selectedLabelId}
             dataHomeUploaded={dataHomeUploaded}
             onClickLabel={(item: any) => onClickLabel(item, mapRef, sliderRef)}
@@ -282,8 +324,28 @@ function LeafLeftMapContent({
         _.get(dataHomeUploaded, "geo_data.lat"),
         _.get(dataHomeUploaded, "geo_data.lng"),
       ]);
+      // Ensure tiles are laid out correctly after container size changes
+      setTimeout(() => {
+        try {
+          leafleftMap.invalidateSize();
+        } catch {}
+      }, 0);
     }
   }, [dataHomeUploaded, leafleftMap]);
+
+  useEffect(() => {
+    const invalidate = () => {
+      try {
+        leafleftMap.invalidateSize();
+      } catch {}
+    };
+    const t = setTimeout(invalidate, 0);
+    window.addEventListener("resize", invalidate);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", invalidate);
+    };
+  }, [leafleftMap]);
 
   return (
     <>
