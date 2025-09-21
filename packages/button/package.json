@@ -1,0 +1,31 @@
+{
+  "name": "@acme/button",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -b && eslint . && vitest run",
+    "test": "vitest",
+    "dev": "ladle"
+  },
+  "peerDependencies": {
+    "antd": "^5.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "antd": "^5.27.4",
+    "@acme/theme-tokens": "workspace:*",
+    "@testing-library/react": "^14.3.1",
+    "typescript": "^5.5.4",
+    "vitest": "^1.6.0"
+  }
+}

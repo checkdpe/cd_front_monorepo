@@ -1,0 +1,1015 @@
+@use "styles/definition/text";
+@use "styles/definition/variables" as variables;
+
+.energy-home {
+  .energy-home__result {
+    width: 85%;
+    margin: auto;
+    max-width: 1600px;
+
+    @media screen and (max-width: 1024px) {
+      width: 100%;
+    }
+    .ant-card-body {
+      padding: 28px;
+      @media screen and (max-width: 768px) {
+        padding: 16px;
+      }
+    }
+
+    .overlay-2 {
+      position: absolute;
+      z-index: 1000;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.8); /* Semi-transparent background */
+    }
+
+    .energy-home__result-auth {
+      position: relative;
+      .overlay {
+        position: absolute;
+        z-index: 1000;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.5); /* Semi-transparent background */
+        backdrop-filter: blur(3px); /* Blur effect */
+        .overlay__content {
+          display: flex;
+          justify-content: space-evenly;
+          align-items: center;
+          margin: auto;
+          margin-top: 80px;
+          flex-wrap: wrap;
+          row-gap: 40px;
+          max-width: max-content;
+          column-gap: 70px;
+          .offre-item {
+            background-color: white;
+            border: 2px solid #1e6862;
+            max-width: 360px;
+            padding: 20px 16px 28px;
+            border-radius: 16px;
+            min-height: 791px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            &.offre-item--dark {
+              border: 2px solid #002060ff;
+            }
+
+            @media screen and (max-width: 600px) {
+              max-width: 320px;
+            }
+
+            .title {
+              font-weight: 600;
+              font-size: 32px;
+              margin-bottom: 12px;
+            }
+            .description {
+              font-size: 16px;
+              margin-bottom: 32px;
+            }
+
+            .btn-rapport {
+              width: 100%;
+              height: 40px;
+              background-color: #1e6862;
+              border-color: #1e6862;
+              color: #fff;
+              font-weight: 600;
+              font-size: 18px;
+              &:hover {
+                background-color: #237a73;
+              }
+
+              &.btn-rapport--dark {
+                background-color: #002060ff;
+                border-color: #002060ff;
+                &:hover {
+                  background-color: rgb(0, 41, 122);
+                }
+              }
+            }
+          }
+        }
+        .offre-login {
+          background-color: white;
+          border: 2px solid #1e6862;
+          border-radius: 8px;
+          padding: 12px 24px;
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          @media screen and (max-width: 840px) {
+            justify-content: center;
+            gap: 20px;
+            max-width: 360px;
+            margin: auto;
+          }
+
+          @media screen and (max-width: 600px) {
+            max-width: 320px;
+            padding: 12px 16px;
+          }
+
+          .btn-rapport {
+            width: 240px;
+            height: 48px;
+            background-color: #1e6862;
+            border-color: #1e6862;
+            color: #fff;
+            font-weight: 600;
+            font-size: 18px;
+            &:hover {
+              background-color: #237a73;
+            }
+
+            &.btn-rapport--dark {
+              background-color: #002060ff;
+              border-color: #002060ff;
+              &:hover {
+                background-color: rgb(0, 41, 122);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    .energy-home__project-card {
+      padding: 24px 0 24px;
+
+      @media screen and (max-width: 992px) {
+        padding: 24px 12px;
+      }
+      @media screen and (max-width: 576px) {
+        padding: 24px 0px;
+      }
+
+      .ant-card-head {
+        border-bottom: 0;
+        padding: 0 20px;
+      }
+
+      .energy-home__project {
+        .energy-home__project-info {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          margin-top: 12px;
+          gap: 16px;
+          @media screen and (max-width: 1400px) {
+            flex-wrap: wrap;
+          }
+          .ant-tabs-tab {
+            height: 30px;
+            line-height: 50px;
+            padding: 0 16px;
+          }
+          .ant-tabs {
+            width: 800px;
+            flex-shrink: 0;
+            @media screen and (max-width: 1400px) {
+              width: 100%;
+            }
+
+            .ant-tabs-nav-wrap {
+              background-color: #f4f4f4;
+              border-radius: 100px;
+              padding: 4px;
+              .ant-tabs-nav-list {
+                width: 100%;
+                .ant-tabs-tab {
+                  margin: 0;
+                  flex: 1;
+                  justify-content: center;
+                  border-radius: 100px;
+                  @extend .text-regular;
+
+                  .ant-tabs-tab-btn {
+                    color: variables.$black;
+                  }
+
+                  &.ant-tabs-tab-active {
+                    background-color: #dcdcdc;
+                    @extend .text-regular-bold;
+                  }
+                }
+              }
+            }
+            .ant-tabs-ink-bar {
+              display: none;
+            }
+            .ant-tabs-nav {
+              &::before {
+                display: none;
+              }
+            }
+          }
+
+          .info-du-bien {
+            border-radius: 40px;
+            padding: 16px 40px;
+            padding-right: 24px;
+            background-color: #f4f4f4;
+
+            .info-du-bien__inner {
+              display: flex;
+              column-gap: 12px;
+              row-gap: 8px;
+              @media screen and (max-width: 1200px) {
+                flex-wrap: wrap;
+              }
+            }
+
+            ul {
+              display: flex;
+              flex-direction: column;
+              row-gap: 8px;
+              flex-shrink: 0;
+              max-width: 400px;
+              .text-truncate {
+                overflow: hidden;
+                display: -webkit-box;
+                -webkit-line-clamp: 2; /* number of lines to show */
+                line-clamp: 2;
+                -webkit-box-orient: vertical;
+              }
+
+              &:first-child {
+                flex-basis: 46%;
+              }
+              &:last-child {
+                flex-basis: 54%;
+              }
+              @media screen and (max-width: 768px) {
+                flex-basis: 100% !important;
+              }
+            }
+            @media screen and (max-width: 600px) {
+              padding: 16px 24px;
+            }
+          }
+        }
+      }
+
+      .manage-infos {
+        border-radius: 40px;
+        padding: 16px 40px;
+        background-color: #f4f4f4;
+        display: flex;
+        flex-direction: column;
+        row-gap: 4px;
+        max-width: 680px;
+      }
+    }
+
+    .energy-home__votre {
+      .votre-item {
+        border: 1px solid #000000;
+        padding: 5px 8px;
+        border-radius: 10px;
+        opacity: 0.3;
+        pointer-events: none;
+        &.active {
+          opacity: 1;
+          pointer-events: auto;
+        }
+      }
+    }
+
+    .energy-home__resultats {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+
+      @media screen and (max-width: 1200px) {
+        align-items: center;
+      }
+
+      .ant-tabs {
+        width: 80% !important;
+
+        @media screen and (max-width: 600px) {
+          width: 100% !important;
+        }
+      }
+
+      .ant-badge {
+        .ant-badge-count {
+          width: 100px;
+          height: 48px;
+          border-radius: 28px;
+          font-size: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+      }
+
+      .svg-image {
+        text-align: left;
+        width: 275px;
+
+        .ant-skeleton {
+          width: 100%;
+        }
+        .ant-skeleton-button {
+          width: 100%;
+          height: 332px;
+        }
+      }
+
+      img {
+        width: 275px;
+        max-height: 332px;
+      }
+
+      .info-resultat-item {
+        svg {
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+        }
+      }
+    }
+
+    .energy-home__notifications {
+      .notification-item {
+        position: relative;
+        &::marker {
+          color: transparent;
+        }
+        &::before {
+          content: "";
+          display: block;
+          width: 12px;
+          height: 12px;
+          position: absolute;
+          left: -20px;
+          top: 6px;
+          border-radius: 50%;
+        }
+        &.info {
+          &::before {
+            background-color: #89ea29;
+          }
+        }
+        &.warning {
+          &::before {
+            background-color: #f2da04;
+          }
+        }
+        &.error {
+          &::before {
+            background-color: #ff4d4f;
+          }
+        }
+      }
+    }
+
+    .energy-home__project-info__indice {
+      background-color: #ededed;
+      border-radius: 30px;
+      min-width: 283px;
+      position: relative;
+      z-index: 100;
+      display: grid;
+      grid-template-columns: 0.6fr 1fr 0.4fr;
+      gap: 20px;
+
+      @media screen and (max-width: 1000px) {
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        padding-inline: 30px;
+      }
+
+      @media screen and (max-width: 680px) {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        padding-block: 10px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 4px;
+      }
+      .dot-large {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        border: 1px solid;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        &.dot-qualite {
+          background-color: #94c795;
+          border-color: #7abd7a;
+        }
+        &.dot-coherence {
+          background-color: #f9c895;
+          border-color: #fcbf7f;
+        }
+        &.dot-issue {
+          background-color: #fef3f2;
+          color: #bb3e34;
+          border-color: #bb3e34;
+          font-weight: 600;
+        }
+      }
+
+      .fiabilite-number {
+        font-size: 24px;
+        font-weight: 600;
+      }
+
+      .anticon-info-circle {
+        font-size: 16px;
+        cursor: pointer;
+      }
+
+      .fiabilite-container {
+        margin: 50px auto 20px;
+        .gauge {
+          width: 100%;
+          height: 30px;
+          border-radius: 15px;
+          background: linear-gradient(to right, red, yellow, green);
+          position: relative;
+        }
+        .pointer {
+          position: absolute;
+          top: -32px;
+          width: 2px;
+          height: 28px;
+        }
+        .labels {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 10px;
+          font-size: 14px;
+        }
+      }
+      @media screen and (max-width: 1152px) {
+        width: 100%;
+      }
+    }
+
+    .energy-home__distribution {
+      .bar-chart {
+        margin: auto;
+        height: 240px;
+        margin-top: 30px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding-bottom: 50px;
+
+        .bar {
+          display: inline-block;
+          width: 60px;
+          margin: 0 5px;
+          border-radius: 10px;
+          position: relative;
+          // fill: lightgray;
+        }
+
+        // .label {
+        //   font-size: 14px;
+        //   text-anchor: middle;
+        //   font-weight: bold;
+        // }
+
+        .bar-label {
+          position: absolute;
+          width: 100%;
+          top: -22px;
+          font-weight: bold;
+          text-align: center;
+          @media screen and (max-width: 768px) {
+            font-size: 10px;
+          }
+        }
+
+        .percentage {
+          font-size: 14px;
+          text-anchor: middle;
+          font-weight: 600;
+        }
+
+        .box {
+          stroke: gray;
+          stroke-width: 1px;
+        }
+
+        .arrow {
+          fill: green;
+          position: relative;
+          top: 2px;
+        }
+
+        .indicator {
+          position: absolute;
+          bottom: -25px;
+          width: 100%;
+          text-align: center;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .indicator-triangle {
+          position: absolute;
+          bottom: -45px;
+          width: 100%;
+          .triangle {
+            margin: 0 auto;
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 16px solid black;
+            position: relative;
+            &::after {
+              content: "";
+              width: 0;
+              height: 0;
+              border-left: 7px solid transparent;
+              border-right: 7px solid transparent;
+              border-bottom: 10px solid white;
+              position: absolute;
+              top: 4px;
+              left: -7px;
+            }
+          }
+        }
+      }
+    }
+
+    .energy-home__performance {
+      .bar-chart {
+        margin: auto;
+        height: 240px;
+        margin-top: 30px;
+        display: flex;
+        align-items: flex-end;
+        padding-bottom: 50px;
+
+        .bar {
+          display: inline-block;
+          width: 80px;
+          border: 1px solid black;
+          position: relative;
+          // fill: lightgray;
+        }
+
+        // .label {
+        //   font-size: 14px;
+        //   text-anchor: middle;
+        //   font-weight: bold;
+        // }
+
+        .bar-label {
+          position: absolute;
+          width: 100%;
+          top: -22px;
+          font-weight: bold;
+          text-align: center;
+          @media screen and (max-width: 768px) {
+            font-size: 10px;
+          }
+        }
+
+        .percentage {
+          font-size: 14px;
+          text-anchor: middle;
+          font-weight: 600;
+        }
+
+        .box {
+          stroke: gray;
+          stroke-width: 1px;
+        }
+
+        .arrow {
+          fill: green;
+          position: relative;
+          top: 2px;
+        }
+
+        .indicator {
+          position: absolute;
+          bottom: -25px;
+          width: 100%;
+          text-align: center;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .indicator-triangle {
+          position: absolute;
+          bottom: -45px;
+          width: 100%;
+          .triangle {
+            margin: 0 auto;
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 16px solid black;
+            position: relative;
+            &::after {
+              content: "";
+              width: 0;
+              height: 0;
+              border-left: 7px solid transparent;
+              border-right: 7px solid transparent;
+              border-bottom: 10px solid white;
+              position: absolute;
+              top: 4px;
+              left: -7px;
+            }
+          }
+        }
+      }
+    }
+
+    .energy-home__maps {
+      .ant-tabs {
+        width: 100%;
+        .ant-tabs-nav-wrap {
+          background-color: #f4f4f4;
+          border-radius: 100px;
+          padding: 4px;
+          .ant-tabs-nav-list {
+            width: 100%;
+            .ant-tabs-tab {
+              padding: 3px;
+              margin: 0;
+              flex: 1;
+              justify-content: center;
+              border-radius: 100px;
+              @extend .text-regular;
+
+              .ant-tabs-tab-btn {
+                color: variables.$black;
+              }
+
+              &.ant-tabs-tab-active {
+                background-color: #dcdcdc;
+                @extend .text-regular-bold;
+              }
+            }
+          }
+        }
+        .ant-tabs-ink-bar {
+          display: none;
+        }
+        .ant-tabs-nav {
+          margin-bottom: 0;
+          &::before {
+            display: none;
+          }
+        }
+      }
+
+      .map-wrapper {
+        margin-top: 16px;
+        width: 100%;
+        height: 480px;
+        .leaflet-container {
+          height: 100%;
+        }
+        .label-container--selected {
+          outline: 2px solid #000;
+        }
+      }
+
+      .autocomplete-item {
+        border: 1px solid #dedede;
+        background: #ffffffe5;
+        padding: 28px 20px;
+        border-radius: 30px;
+        max-width: 317px;
+
+        .autocomplete-item__title {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 12px;
+          font-weight: 600;
+          font-size: 16px;
+        }
+      }
+      .ant-skeleton {
+        width: 100% !important;
+        height: 176px;
+        .ant-skeleton-image {
+          height: 100%;
+        }
+      }
+      .slick-slider .slick-slide {
+        padding: 0 12px;
+      }
+      .slick-arrow {
+        svg {
+          width: 100%;
+          height: 100%;
+          path {
+            fill: #000;
+          }
+        }
+      }
+    }
+  }
+
+  .energy-home__suggestion-renovation {
+    .ant-tabs {
+      .ant-tabs-nav-wrap {
+        background-color: #f4f4f4;
+        border-radius: 100px;
+        padding: 4px;
+        .ant-tabs-nav-list {
+          width: 100%;
+          .ant-tabs-tab {
+            padding: 3px;
+            margin: 0;
+            flex: 1;
+            justify-content: center;
+            border-radius: 100px;
+            @extend .text-regular;
+
+            .ant-tabs-tab-btn {
+              color: variables.$black;
+            }
+
+            &.ant-tabs-tab-active {
+              background-color: #dcdcdc;
+              @extend .text-regular-bold;
+            }
+          }
+        }
+      }
+      .ant-tabs-ink-bar {
+        display: none;
+      }
+      .ant-tabs-nav {
+        &::before {
+          display: none;
+        }
+      }
+    }
+
+    .suggestion-item {
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: 1px solid #000000;
+      &.active {
+        border: 1px solid #3b8686;
+        background: #3b86864d;
+      }
+
+      .icon-stat {
+        path {
+          fill: #0000004d;
+        }
+        &.icon-stat--active {
+          path {
+            fill: #000;
+          }
+        }
+      }
+    }
+
+    .energy-home__montant {
+      padding: 12px 20px;
+      background: #eeeeee;
+      border-radius: 30px;
+      max-width: max-content;
+
+      p {
+        color: #414141;
+      }
+
+      .montant-label {
+        width: 60px;
+        height: 60px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 40px;
+      }
+    }
+
+    .btn-demarrer {
+      background-color: #0d4869;
+      border-radius: 12px;
+      color: white;
+      padding: 20px;
+      font-size: 16px;
+      font-weight: 500;
+      margin-top: 16px;
+      &:hover {
+        background-color: #0f537b !important;
+        color: white !important;
+      }
+    }
+
+    .bloc-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      justify-items: center;
+      align-items: center;
+
+      @media screen and (min-width: 768px) {
+        grid-template-columns: 3fr 1fr;
+        align-items: flex-start;
+      }
+    }
+
+    .text-container {
+      .title {
+        display: flex;
+        align-items: center;
+        gap: 2.5%;
+
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 20px;
+
+        @media screen and (max-width: 768px) {
+          font-size: 20px;
+          gap: 2%;
+        }
+      }
+    }
+
+    .house-icon {
+      @media screen and (min-width: 768px) {
+        margin-left: 40%;
+      }
+    }
+
+    .pending-container {
+      @media screen and (min-width: 768px) {
+        margin-top: 1%;
+        margin-inline: 15%;
+      }
+    }
+
+    .construction-container {
+      .title,
+      .subTitle {
+        font-size: 20px;
+
+        @media screen and (min-width: 768px) {
+          font-size: 26px;
+        }
+      }
+
+      .list {
+        margin-top: 20px;
+
+        .extra-list {
+          margin-top: 20px;
+        }
+
+        @media screen and (min-width: 768px) {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 5%;
+        }
+      }
+
+      .description {
+        margin-top: 20px;
+        font-weight: 400;
+        line-height: 1.5;
+      }
+
+      @media screen and (min-width: 768px) {
+        margin-inline: 15%;
+      }
+    }
+  }
+
+  .energy-home__suggestion-renovation__tabs {
+    .ant-tabs-tab {
+      height: 50px;
+      line-height: 50px;
+      padding: 0 16px;
+    }
+
+    .ant-tabs-tab-btn {
+      font-size: 16px;
+    }
+  }
+
+  .energy-home__graphe-price {
+    margin-top: 30px;
+    height: 340px;
+
+    #graphe-price-chart {
+      height: 100%;
+    }
+    .axis line,
+    .axis path {
+      stroke: #ddd;
+    }
+    .current-value-line {
+      stroke: #79bd9a;
+      stroke-width: 4;
+      stroke-dasharray: 10, 5;
+    }
+    .gaussian {
+      fill: #3b86861a;
+      stroke: #3b8686;
+      stroke-width: 3;
+    }
+    .annotation {
+      fill: #000;
+    }
+  }
+
+  .energy-home__loader {
+    width: 50%;
+    margin: auto;
+    max-width: 1600px;
+    @media screen and (max-width: 1024px) {
+      width: 100%;
+    }
+    .ant-card-body {
+      padding: 28px;
+      @media screen and (max-width: 768px) {
+        padding: 16px;
+      }
+    }
+
+    .title {
+      font-weight: 700;
+      font-size: 20px;
+      line-height: 150%;
+      margin-bottom: 16px;
+    }
+
+    .energy-home__loader__steps {
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+
+      li {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+        font-size: 16px;
+        line-height: 150%;
+        color: #808080;
+        padding-left: 20px;
+        position: relative;
+        &.active {
+          color: #000;
+          padding-left: 0;
+          .anticon-check {
+            color: #3b8686;
+          }
+        }
+
+        .ant-spin {
+          position: absolute;
+          top: 50%;
+          transform: translate(0, -50%);
+          left: 0;
+          .anticon-loading {
+            font-size: 16px;
+          }
+        }
+      }
+    }
+  }
+}
+
+.btn-flex {
+  span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  svg {
+    fill: #fff;
+  }
+}
