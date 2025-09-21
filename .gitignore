@@ -1,2 +1,4 @@
 node_modules
 .DS_Store
+apps/dashboard/.env
+packages/mon-dpe/.env

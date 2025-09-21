@@ -22,3 +22,4 @@ pnpm test || true
 echo "Done. Start the app with:"
 echo "pnpm --filter @acme/landing dev  # landing app"
 echo "pnpm --filter @acme/dashboard dev  # dashboard app"
+echo "pnpm --filter @acme/dataviz dev  # dataviz app"
