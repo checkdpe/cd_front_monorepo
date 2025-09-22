@@ -634,7 +634,7 @@ export const App: React.FC = () => {
               <DpeDrawerEditor
                 open={isEditorOpen}
                 onClose={() => setIsEditorOpen(false)}
-                width="40%"
+                width="50%"
                 rootJsonText={jsonText}
                 onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
                 apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}

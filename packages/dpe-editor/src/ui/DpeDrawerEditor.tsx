@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
 import { fetchSimulationDpeFullJson } from "../api";
 
@@ -38,7 +38,7 @@ function ensurePath(root: any, path: string[]): any {
   return cursor;
 }
 
-export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "30%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath }) => {
+export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath }) => {
   const [availableOptions, setAvailableOptions] = useState<Record<VariantKey, { key: string; description: string; selected: boolean; payload: any }[]>>({ haut: [], bas: [] });
   const [highlighted, setHighlighted] = useState<Record<VariantKey, Record<string, boolean>>>({ haut: {}, bas: {} });
   const [pricing, setPricing] = useState<Record<VariantKey, { increments: number[]; priceVar: number[]; priceFix: number[]; incrementUnit: string; priceUnit: string }>>({
@@ -55,6 +55,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   });
 
   const [mappingKeys, setMappingKeys] = useState<Record<VariantKey, { inputKey?: string; costKey?: string }>>({ haut: {}, bas: {} });
+  const originalJsonRef = useRef<string>("");
+  const [scenarioEnabled, setScenarioEnabled] = useState<Record<VariantKey, boolean[]>>({ haut: [], bas: [] });
   // Fetch from API when the drawer opens if configured
   useEffect(() => {
     if (!open || !apiLoadParams || !getAccessToken) return;
@@ -130,6 +132,13 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       // ignore
     }
   }, [rootJsonText]);
+
+  // Capture original JSON when opening, used to rollback on close (X)
+  useEffect(() => {
+    if (open) {
+      originalJsonRef.current = rootJsonText;
+    }
+  }, [open]);
 
   // (no-op)
 
@@ -234,6 +243,22 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     }
   }
 
+  function handleDrawerClose() {
+    Modal.confirm({
+      title: "Discard changes?",
+      content: "Closing will revert any changes made in this panel.",
+      okText: "Discard",
+      cancelText: "Cancel",
+      onOk: () => {
+        try {
+          onApply(originalJsonRef.current);
+        } finally {
+          onClose();
+        }
+      },
+    });
+  }
+
   function getFirstScenarioInputKey(variantKey: VariantKey): string | undefined {
     try {
       let parsed: any = [];
@@ -330,6 +355,54 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     } catch {}
   }, [open, rootJsonText, mappingKeys]);
 
+  // Sync scenario enabled flags from JSON
+  useEffect(() => {
+    if (!open) return;
+    try {
+      let parsed: any = [];
+      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+      (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+        const v = editorVariants[k];
+        const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+        const entry = runs.find((r) => r && r.elements_variant === variantPath);
+        const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+        const flags = scenarios.map((sc) => Boolean(sc && typeof sc === "object"));
+        setScenarioEnabled((prev) => ({ ...prev, [k]: flags }));
+      });
+    } catch {}
+  }, [open, rootJsonText]);
+
+  function toggleScenarioPresence(variantKey: VariantKey, idx: number, enabled: boolean) {
+    try {
+      let parsed: any = [];
+      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+      const v = editorVariants[variantKey];
+      const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+      let entry = runs.find((r) => r && r.elements_variant === variantPath);
+      if (!entry) {
+        entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+        runs.push(entry);
+      }
+      if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
+      while (entry.scenarios.length <= idx) entry.scenarios.push(null);
+      if (enabled) {
+        const current = entry.scenarios[idx];
+        entry.scenarios[idx] = current && typeof current === "object" ? current : { id: idx + 1, input: {}, cost: {} };
+      } else {
+        entry.scenarios[idx] = null;
+      }
+      onApply(JSON.stringify(runs, null, 2));
+      setScenarioEnabled((prev) => {
+        const current = prev[variantKey] ? prev[variantKey].slice() : [];
+        while (current.length <= idx) current.push(false);
+        current[idx] = enabled;
+        return { ...prev, [variantKey]: current };
+      });
+    } catch {}
+  }
+
   function updateVariantPricingInJson(
     variantKey: VariantKey,
     _override?: { increments?: number[]; priceVar?: number[]; priceFix?: number[]; incrementUnit?: string; priceUnit?: string },
@@ -378,13 +451,12 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       title="Edit DPE JSON"
       placement="right"
       open={open}
-      onClose={onClose}
+      onClose={handleDrawerClose}
       width={width}
       mask={false}
       extra={
         <Space>
-          <Button onClick={onClose}>Close</Button>
-          <Button type="primary" onClick={applyEditorChanges}>Apply changes</Button>
+          <Button type="primary" onClick={applyEditorChanges}>OK</Button>
         </Space>
       }
     >
@@ -488,120 +560,142 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: `100px repeat(${pricing[k].increments.length}, minmax(72px, 1fr))`,
+                    gridTemplateColumns: `80px repeat(3, minmax(72px, 1fr))`,
                     gap: 4,
                     alignItems: "center",
                   }}
                 >
+                  {/* Header row: columns as Increment | Price var | Price fix */}
+                  <div />
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Increment</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[k].incrementUnit})</span>
                     <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "increments", tempUnit: pricing[k].incrementUnit, tempKey: mappingKeys[k]?.inputKey || getFirstScenarioInputKey(k) || "" })} />
                   </div>
-                  {pricing[k].increments.map((val, idx) => (
-                    <div key={`inc-${idx}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <InputNumber
-                        size="small"
-                        controls={false}
-                        min={0}
-                        value={val}
-                        onChange={(next) => {
-                          const nextVal = Number(next ?? 0);
-                          setPricing((prev) => {
-                            const current = prev[k];
-                            const nextIncs = current.increments.slice();
-                            nextIncs[idx] = nextVal;
-                            return { ...prev, [k]: { ...current, increments: nextIncs } };
-                          });
-                        }}
-                        onBlur={(e) => {
-                          const value = Number((e?.target as HTMLInputElement)?.value ?? val);
-                          updateVariantPricingInJson(k, undefined, idx, value);
-                        }}
-                        style={{ width: "100%" }}
-                      />
-                    </div>
-                  ))}
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Price var</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[k].priceUnit})</span>
                     <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "priceVar", tempUnit: pricing[k].priceUnit, tempKey: mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "" })} />
                   </div>
-                  {pricing[k].priceVar.map((val, idx) => (
-                    <div key={`price-${idx}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <InputNumber
-                        size="small"
-                        controls={false}
-                        min={0}
-                        value={val}
-                        onChange={(next) => {
-                          const nextVal = Number(next ?? 0);
-                          setPricing((prev) => {
-                            const current = prev[k];
-                            const nextPrices = current.priceVar.slice();
-                            nextPrices[idx] = nextVal;
-                            return { ...prev, [k]: { ...current, priceVar: nextPrices } };
-                          });
-                        }}
-                        onBlur={(e) => {
-                          const value = Number((e?.target as HTMLInputElement)?.value ?? val);
-                      // Map variable price to scenario cost key index
-                      try {
-                        let parsed: any = [];
-                        try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-                        const runs: any[] = Array.isArray(parsed) ? parsed : [];
-                        const v = editorVariants[k];
-                        const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
-                        let entry = runs.find((r) => r && r.elements_variant === variantPath);
-                        if (!entry) {
-                          entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-                          runs.push(entry);
-                        }
-                        if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
-                        while (entry.scenarios.length <= idx) {
-                          entry.scenarios.push({ id: entry.scenarios.length + 1, input: {}, cost: {} });
-                        }
-                        const sc = entry.scenarios[idx] || ({} as any);
-                        const configuredCostKey = mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "donnee_entree.surface_paroi_opaque";
-                        if (!sc.cost || typeof sc.cost !== "object") sc.cost = {};
-                        sc.cost[configuredCostKey] = { multiply: value };
-                        entry.scenarios[idx] = sc;
-                        onApply(JSON.stringify(runs, null, 2));
-                      } catch {}
-                        }}
-                        style={{ width: "100%" }}
-                      />
-                    </div>
-                  ))}
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Price fix</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[k].priceUnit})</span>
                     <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "priceFix", tempUnit: pricing[k].priceUnit, tempKey: mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "" })} />
                   </div>
-                  {pricing[k].priceFix.map((val, idx) => (
-                    <div key={`pricefix-${idx}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <InputNumber
-                        size="small"
-                        controls={false}
-                        min={0}
-                        value={val}
-                        onChange={(next) => {
-                          const nextVal = Number(next ?? 0);
-                          setPricing((prev) => {
-                            const current = prev[k];
-                            const nextPrices = current.priceFix.slice();
-                            nextPrices[idx] = nextVal;
-                            return { ...prev, [k]: { ...current, priceFix: nextPrices } };
-                          });
-                        }}
-                        onBlur={(e) => {
-                          const value = Number((e?.target as HTMLInputElement)?.value ?? val);
-                          updateVariantPricingInJson(k, undefined, idx, value);
-                        }}
-                        style={{ width: "100%" }}
-                      />
-                    </div>
-                  ))}
+
+                  {(() => {
+                    const rowCount = Math.max(
+                      pricing[k].increments.length,
+                      pricing[k].priceVar.length,
+                      pricing[k].priceFix.length
+                    );
+                    return Array.from({ length: rowCount }).map((_, idx) => {
+                      const incVal = pricing[k].increments[idx] ?? 0;
+                      const priceVarVal = pricing[k].priceVar[idx] ?? 0;
+                      const priceFixVal = pricing[k].priceFix[idx] ?? 0;
+                      return (
+                        <React.Fragment key={`row-${idx}`}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#6b7280", fontSize: 12 }}>
+                            <Checkbox
+                              checked={Boolean(scenarioEnabled[k]?.[idx])}
+                              onChange={(e) => toggleScenarioPresence(k, idx, e.target.checked)}
+                            />
+                            <span>#{idx + 1}</span>
+                          </label>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <InputNumber
+                              size="small"
+                              controls={false}
+                              min={0}
+                              value={incVal}
+                              onChange={(next) => {
+                                const nextVal = Number(next ?? 0);
+                                setPricing((prev) => {
+                                  const current = prev[k];
+                                  const nextIncs = current.increments.slice();
+                                  while (nextIncs.length <= idx) nextIncs.push(0);
+                                  nextIncs[idx] = nextVal;
+                                  return { ...prev, [k]: { ...current, increments: nextIncs } };
+                                });
+                              }}
+                              onBlur={(e) => {
+                                const value = Number((e?.target as HTMLInputElement)?.value ?? incVal);
+                                updateVariantPricingInJson(k, undefined, idx, value);
+                              }}
+                              style={{ width: "100%" }}
+                            />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <InputNumber
+                              size="small"
+                              controls={false}
+                              min={0}
+                              value={priceVarVal}
+                              onChange={(next) => {
+                                const nextVal = Number(next ?? 0);
+                                setPricing((prev) => {
+                                  const current = prev[k];
+                                  const nextPrices = current.priceVar.slice();
+                                  while (nextPrices.length <= idx) nextPrices.push(0);
+                                  nextPrices[idx] = nextVal;
+                                  return { ...prev, [k]: { ...current, priceVar: nextPrices } };
+                                });
+                              }}
+                              onBlur={(e) => {
+                                const value = Number((e?.target as HTMLInputElement)?.value ?? priceVarVal);
+                                try {
+                                  let parsed: any = [];
+                                  try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                                  const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                                  const v = editorVariants[k];
+                                  const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+                                  let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                                  if (!entry) {
+                                    entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                                    runs.push(entry);
+                                  }
+                                  if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
+                                  while (entry.scenarios.length <= idx) {
+                                    entry.scenarios.push({ id: entry.scenarios.length + 1, input: {}, cost: {} });
+                                  }
+                                  const sc = entry.scenarios[idx] || ({} as any);
+                                  const configuredCostKey = mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "donnee_entree.surface_paroi_opaque";
+                                  if (!sc.cost || typeof sc.cost !== "object") sc.cost = {};
+                                  sc.cost[configuredCostKey] = { multiply: value };
+                                  entry.scenarios[idx] = sc;
+                                  onApply(JSON.stringify(runs, null, 2));
+                                } catch {}
+                              }}
+                              style={{ width: "100%" }}
+                            />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <InputNumber
+                              size="small"
+                              controls={false}
+                              min={0}
+                              value={priceFixVal}
+                              onChange={(next) => {
+                                const nextVal = Number(next ?? 0);
+                                setPricing((prev) => {
+                                  const current = prev[k];
+                                  const nextPrices = current.priceFix.slice();
+                                  while (nextPrices.length <= idx) nextPrices.push(0);
+                                  nextPrices[idx] = nextVal;
+                                  return { ...prev, [k]: { ...current, priceFix: nextPrices } };
+                                });
+                              }}
+                              onBlur={(e) => {
+                                const value = Number((e?.target as HTMLInputElement)?.value ?? priceFixVal);
+                                updateVariantPricingInJson(k, undefined, idx, value);
+                              }}
+                              style={{ width: "100%" }}
+                            />
+                          </div>
+                        </React.Fragment>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             </Card>
