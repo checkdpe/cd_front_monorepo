@@ -7,6 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  base: "/simul/",
   publicDir: resolve(__dirname, "../../assets/images"),
 });
 

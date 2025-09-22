@@ -7,6 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  base: "/auth/",
   publicDir: resolve(__dirname, "../../assets/images"),
 });
 
