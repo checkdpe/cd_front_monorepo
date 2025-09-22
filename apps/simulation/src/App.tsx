@@ -20,6 +20,10 @@ export const App: React.FC = () => {
   const [bridgeReady, setBridgeReady] = useState<boolean>(false);
   const [bridgeAuthenticated, setBridgeAuthenticated] = useState<boolean>(false);
   const hasInitFetchedRef = useRef<boolean>(false);
+  const hasUserEditedRef = useRef<boolean>(false);
+  const [refAdeme, setRefAdeme] = useState<string | undefined>(undefined);
+  const [simulLog, setSimulLog] = useState<string | undefined>(undefined);
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState<boolean>(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -48,6 +52,15 @@ export const App: React.FC = () => {
     window.addEventListener("message", onMessage);
     
     (async () => {
+      try {
+        const url = new URL(window.location.href);
+        const ra = url.searchParams.get("ref_ademe") || undefined;
+        const sim = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string | undefined) || undefined;
+        if (!isCancelled) {
+          setRefAdeme(ra);
+          setSimulLog(sim);
+        }
+      } catch {}
       // Immediate cookie-based fallback for username/email
       try {
         const parts = document.cookie.split("; ").filter(Boolean);
@@ -135,6 +148,9 @@ export const App: React.FC = () => {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
         // eslint-disable-next-line no-console
         console.log("get_redis_detail (bridge)", data);
       } catch (err) {
@@ -176,6 +192,9 @@ export const App: React.FC = () => {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
         // eslint-disable-next-line no-console
         console.log("get_redis_detail", data);
       } catch (err) {
@@ -275,6 +294,7 @@ export const App: React.FC = () => {
         authLabel={userEmail || "login / sign-up"}
         authHref={import.meta.env.VITE_AUTH_URL || "/auth"}
         isAuthenticated={Boolean(userEmail)}
+        centeredTitle={refAdeme}
         logoutHref={(() => {
           const domain = (import.meta.env.VITE_COGNITO_DOMAIN_URL as string | undefined)?.replace(/^https?:\/\//, "");
           if (!domain) return undefined;
@@ -309,7 +329,7 @@ export const App: React.FC = () => {
             <div style={{ display: "grid" }}>
               <textarea
                 value={jsonText}
-                onChange={(e) => setJsonText(e.target.value)}
+                onChange={(e) => { hasUserEditedRef.current = true; setJsonText(e.target.value); }}
                 placeholder="Paste or write JSON here"
                 style={{
                   minHeight: 420,
@@ -325,6 +345,35 @@ export const App: React.FC = () => {
                   resize: "vertical",
                 }}
               />
+            </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+              <div style={{ position: "relative" }}>
+                <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
+                {isSaveMenuOpen && (
+                  <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => {
+                      try {
+                        const key = `simul:${simulLog || "default"}`;
+                        localStorage.setItem(key, jsonText);
+                        message.success(`saved ${simulLog || "default"}`);
+                      } catch { message.error("save failed"); }
+                      setIsSaveMenuOpen(false);
+                    }}>save {simulLog || "default"}</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => {
+                      const name = window.prompt("Save as name:", simulLog || "custom");
+                      if (!name) { setIsSaveMenuOpen(false); return; }
+                      try {
+                        const key = `simul:${name}`;
+                        localStorage.setItem(key, jsonText);
+                        message.success(`saved ${name}`);
+                      } catch { message.error("save failed"); }
+                      setIsSaveMenuOpen(false);
+                    }}>save as…</div>
+                  </div>
+                )}
+              </div>
             </div>
           </Card>
         </Col>
@@ -360,11 +409,7 @@ export const App: React.FC = () => {
                 <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
               </div>
 
-              <Flex justify="flex-end">
-                <Button type="primary" onClick={handleSubmit} loading={submitting}>
-                  submit
-                </Button>
-              </Flex>
+              
             </Space>
           </Card>
         </Col>

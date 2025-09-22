@@ -11,9 +11,10 @@ export interface TopMenuProps {
   isAuthenticated?: boolean;
   logoutHref?: string;
   onLogoutClick?: () => void;
+  centeredTitle?: string;
 }
 
-export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth", isAuthenticated = false, logoutHref, onLogoutClick }) => {
+export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth", isAuthenticated = false, logoutHref, onLogoutClick, centeredTitle }) => {
   return (
     <div style={{
       position: "sticky",
@@ -23,13 +24,28 @@ export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMob
       borderBottom: "1px solid #e5e7eb",
       padding: "8px 16px"
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", maxWidth: 1200, margin: "0 auto", columnGap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <picture>
             {logoMobileSrc && <source media="(max-width: 640px)" srcSet={logoMobileSrc} />}
             <img src={logoSrc} alt="logo" style={{ height: 28, width: "auto" }} />
           </picture>
         </div>
+        <div style={{ textAlign: "center" }}>
+          {centeredTitle && (
+            <div style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: "#0b0c0f",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: 600,
+              margin: "0 auto"
+            }}>{centeredTitle}</div>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
         {isAuthenticated ? (
           <button
             onClick={() => {
@@ -98,6 +114,7 @@ export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMob
             {authLabel}
           </button>
         )}
+        </div>
       </div>
     </div>
   );
