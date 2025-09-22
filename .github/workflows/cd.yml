@@ -25,7 +25,7 @@ jobs:
         fi
 
         if [ "$TARGET_BRANCH" = "main" ]; then
-          echo "Deploying to dev"
+          echo "Deploying to devvv "
           echo "LD_ENV=dev" >> $GITHUB_ENV
           echo "DISTRIBUTION=E1J0K624XBLCWV" >> $GITHUB_ENV
           echo "S3_BUCKET=bo.scandpe.fr" >> $GITHUB_ENV
