@@ -401,7 +401,25 @@ export const App: React.FC = () => {
     <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
       <TopMenu
         authLabel={userEmail || "login / sign-up"}
-        authHref={import.meta.env.VITE_AUTH_URL || "/auth"}
+        authHref={(() => {
+          const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+          if (configured) {
+            try {
+              const configuredUrl = new URL(configured);
+              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+              if (isConfiguredLocal && !isPageLocal) {
+                // ignore local auth URL on non-localhost pages
+              } else {
+                return configured;
+              }
+            } catch {
+              return configured;
+            }
+          }
+          if (window.location.hostname === "localhost") return "http://localhost:5173";
+          return "/auth";
+        })()}
         isAuthenticated={Boolean(userEmail)}
         centeredTitle={refAdeme}
         logoutHref={(() => {
@@ -418,7 +436,18 @@ export const App: React.FC = () => {
         <iframe
           src={(() => {
             const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
-            if (configured) return configured.replace(/\/$/, "") + "/session-bridge";
+            if (configured) {
+              try {
+                const configuredUrl = new URL(configured);
+                const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+                const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+                if (!(isConfiguredLocal && !isPageLocal)) {
+                  return configured.replace(/\/$/, "") + "/session-bridge";
+                }
+              } catch {
+                return configured.replace(/\/$/, "") + "/session-bridge";
+              }
+            }
             if (window.location.hostname === "localhost") return "http://localhost:5173/session-bridge";
             return "/auth/session-bridge";
           })()}
