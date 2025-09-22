@@ -1,6 +1,6 @@
 name: CD
 
-on: [pull_request]
+on: [ pull_request ]
 
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
         fi
 
         if [ "$TARGET_BRANCH" = "main" ]; then
-          echo "Deploying to dev"
+          echo "Deploying to devvv "
           echo "LD_ENV=dev" >> $GITHUB_ENV
           echo "DISTRIBUTION=E1J0K624XBLCWV" >> $GITHUB_ENV
           echo "S3_BUCKET=bo.scandpe.fr" >> $GITHUB_ENV
@@ -47,17 +47,17 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-        cache: 'pnpm'
-
     - name: Setup pnpm
       uses: pnpm/action-setup@v4
       with:
         version: 9.12.0
         run_install: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'pnpm'
 
     - name: Set up AWS CLI-FR
       uses: aws-actions/configure-aws-credentials@v4
@@ -74,17 +74,37 @@ jobs:
         echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
         echo "AWS_ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
     
-    - name: Init env
-      run: cp .env.$LD_ENV .env
+    - name: Init app env files
+      run: |
+        set -e
+        apps=("simul" "auth")
+        for app in "${apps[@]}"; do
+          src="apps/$app/.$LD_ENV.env"
+          dst="apps/$app/.env"
+          if [ -f "$src" ]; then
+            cp "$src" "$dst"
+            echo "Copied $src -> $dst"
+          else
+            echo "Missing $src; skipping" >&2
+          fi
+        done
 
 
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
 
-    - name: Build packages and apps
+    - name: Build all workspaces
       run: |
-        pnpm -r --filter ./packages/* run build
-        pnpm -r --filter ./apps/* run build
+        set -e
+        pnpm -r run build
+        echo "Verify dist folders"
+        for app in simul auth; do
+          if [ -d "apps/$app/dist" ]; then
+            echo "Found dist for $app"
+          else
+            echo "Missing dist for $app" >&2
+          fi
+        done
 
     - name: Get Commit Message
       id: commit_message

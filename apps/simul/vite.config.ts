@@ -5,9 +5,10 @@ import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
+  base: command === "serve" ? "/" : "/simul/",
   publicDir: resolve(__dirname, "../../assets/images"),
-});
+}));
 
 

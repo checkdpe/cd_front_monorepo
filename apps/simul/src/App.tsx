@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
-import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
+import { DpeDrawerEditor } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 
@@ -31,6 +32,8 @@ export const App: React.FC = () => {
   const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  function openEditor() { setIsEditorOpen(true); }
 
   useEffect(() => {
     let isCancelled = false;
@@ -81,6 +84,28 @@ export const App: React.FC = () => {
             if (raw && !isCancelled) {
               setUserEmail(raw);
               return; // found username from cookie; stop here
+            }
+          }
+        }
+      } catch {}
+
+      // Fallback #2: decode idToken cookie to extract email claim
+      try {
+        const all = document.cookie.split("; ").filter(Boolean);
+        const prefix = "CognitoIdentityServiceProvider.";
+        for (const cookie of all) {
+          const eq = cookie.indexOf("=");
+          if (eq === -1) continue;
+          const name = cookie.substring(0, eq);
+          if (!name.startsWith(prefix) || !name.endsWith(".idToken")) continue;
+          const raw = decodeURIComponent(cookie.substring(eq + 1));
+          const parts = raw.split(".");
+          if (parts.length >= 2) {
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+            const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
+            if (emailClaim && !isCancelled) {
+              setUserEmail(emailClaim);
+              break;
             }
           }
         }
@@ -275,7 +300,7 @@ export const App: React.FC = () => {
     activePollAbortRef.current = { cancel: () => { cancelled = true; setIsPolling(false); } };
 
     const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
-    const resultsHref = `https://bo.scandpe.fr/simul/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
+    const resultsHref = `https://bo.scandpe.fr/simulation/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
 
     setIsPolling(true);
     const tick = async () => {
@@ -401,7 +426,35 @@ export const App: React.FC = () => {
     <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
       <TopMenu
         authLabel={userEmail || "login / sign-up"}
-        authHref={import.meta.env.VITE_AUTH_URL || "/auth"}
+        authHref={(() => {
+          const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+          if (configured) {
+            try {
+              const configuredUrl = new URL(configured);
+              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+              if (isConfiguredLocal && !isPageLocal) {
+                // ignore local auth URL on non-localhost pages
+              } else {
+                // On non-local hosts, prefer explicit index.html so returnTo is added to the file URL
+                if (!isConfiguredLocal) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  if (!endsWithHtml) {
+                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
+                    return base + "/index.html";
+                  }
+                }
+                return configured;
+              }
+            } catch {
+              return configured;
+            }
+          }
+          if (window.location.hostname === "localhost") return "http://localhost:5173";
+          return "/auth/index.html";
+        })()}
         isAuthenticated={Boolean(userEmail)}
         centeredTitle={refAdeme}
         logoutHref={(() => {
@@ -418,9 +471,24 @@ export const App: React.FC = () => {
         <iframe
           src={(() => {
             const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
-            if (configured) return configured.replace(/\/$/, "") + "/session-bridge";
-            if (window.location.hostname === "localhost") return "http://localhost:5173/session-bridge";
-            return "/auth/session-bridge";
+            if (configured) {
+              try {
+                const configuredUrl = new URL(configured);
+                const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+                const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+                if (!(isConfiguredLocal && !isPageLocal)) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  const base = endsWithHtml ? configured : (hasTrailingSlash ? configured.replace(/\/$/, "") + "/index.html" : configured + "/index.html");
+                  return base;
+                }
+              } catch {
+                return configured.replace(/\/$/, "") + "/index.html";
+              }
+            }
+            if (window.location.hostname === "localhost") return "http://localhost:5173/index.html";
+            return "/auth/index.html";
           })()}
           style={{ display: "none" }}
           title="session-bridge"
@@ -430,7 +498,10 @@ export const App: React.FC = () => {
       <Row gutter={[16, 16]}>
         <Col xs={0} lg={4}></Col>
         <Col xs={24} lg={16}>
-          <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+            <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
+          </div>
           <Paragraph style={{ color: "#4b5563", marginTop: 4 }}>Provide JSON and configure options, then submit.</Paragraph>
           
           <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
@@ -553,6 +624,13 @@ export const App: React.FC = () => {
                   </a>
                 )}
               </div>
+              <DpeDrawerEditor
+                open={isEditorOpen}
+                onClose={() => setIsEditorOpen(false)}
+                width="40%"
+                rootJsonText={jsonText}
+                onApply={(next) => setJsonText(next)}
+              />
             </div>
             <SimulationScenariosModal
               open={isScenariosOpen}

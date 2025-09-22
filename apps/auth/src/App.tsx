@@ -47,7 +47,8 @@ const AppInner: React.FC = () => {
                     window.location.href = returnTo;
                     return;
                   }
-                  window.location.href = import.meta.env.VITE_POST_LOGIN_URL || window.location.origin;
+                  window.location.href = (import.meta.env.VITE_POST_LOGIN_URL as string | undefined) ||
+                    (window.location.origin.replace(/\/$/, "") + "/simul/index.html");
                 }}
               >
                 Continue
