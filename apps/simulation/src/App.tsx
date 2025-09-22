@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
-import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message } from "antd";
+import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message, Spin } from "antd";
+import { ExportOutlined } from "@ant-design/icons";
+import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 
@@ -24,6 +26,11 @@ export const App: React.FC = () => {
   const [refAdeme, setRefAdeme] = useState<string | undefined>(undefined);
   const [simulLog, setSimulLog] = useState<string | undefined>(undefined);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [resultsUrl, setResultsUrl] = useState<string | undefined>(undefined);
+  const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -121,6 +128,7 @@ export const App: React.FC = () => {
     if (!bridgeAuthenticated || hasInitFetchedRef.current) return;
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
     if (!refAdeme) return;
 
     const controller = new AbortController();
@@ -133,7 +141,7 @@ export const App: React.FC = () => {
         const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
         const apiUrl = new URL("/backoffice/get_redis_detail", base);
         apiUrl.searchParams.set("ref_ademe", refAdeme);
-        apiUrl.searchParams.set("log", (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl");
+        apiUrl.searchParams.set("log", simul);
         // eslint-disable-next-line no-console
         console.debug("[simulation] calling get_redis_detail (bridge)", apiUrl.toString());
         const res = await authorizedFetch(apiUrl.toString(), {
@@ -166,13 +174,14 @@ export const App: React.FC = () => {
     if (hasInitFetchedRef.current) return;
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
     if (!refAdeme) return;
 
     const controller = new AbortController();
     const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
     const apiUrl = new URL("/backoffice/get_redis_detail", base);
     apiUrl.searchParams.set("ref_ademe", refAdeme);
-    apiUrl.searchParams.set("log", (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl");
+    apiUrl.searchParams.set("log", simul);
 
     async function doFetchOnce() {
       if (hasInitFetchedRef.current) return;
@@ -253,35 +262,135 @@ export const App: React.FC = () => {
     { label: "2", value: 2 },
   ], []);
 
+  useEffect(() => {
+    return () => {
+      try { activePollAbortRef.current?.cancel(); setIsPolling(false); } catch {}
+    };
+  }, []);
+
+  function startPollingForResults(ref: string, log: string) {
+    // cancel any previous polling
+    try { activePollAbortRef.current?.cancel(); } catch {}
+    let cancelled = false;
+    activePollAbortRef.current = { cancel: () => { cancelled = true; setIsPolling(false); } };
+
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const resultsHref = `https://bo.scandpe.fr/simulation/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
+
+    setIsPolling(true);
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", ref);
+        apiUrl.searchParams.set("log", log);
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.status === "processed") {
+            setResultsUrl(resultsHref);
+            cancelled = true;
+            setIsPolling(false);
+            return;
+          }
+        }
+      } catch {}
+      if (!cancelled) {
+        window.setTimeout(tick, 1000);
+      }
+    };
+    tick();
+  }
+
+  async function handleSaveToBackoffice() {
+    try {
+      if (!refAdeme || !simulLog) {
+        message.error("Missing ref_ademe or simul");
+        setIsSaveMenuOpen(false);
+        return;
+      }
+      const ref = `${refAdeme}-${simulLog}`;
+      const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+      const apiUrl = new URL("/backoffice/redis_file_manage", base);
+      setIsSaving(true);
+      // eslint-disable-next-line no-console
+      console.debug("[simulation] POST redis_file_manage", { url: apiUrl.toString(), ref });
+      const res = await authorizedFetch(apiUrl.toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          "x-authorization": "dperdition",
+        },
+        body: JSON.stringify({ ref, text: jsonText }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      message.success(`saved ${simulLog}`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("redis_file_manage failed", err);
+      message.error("save failed");
+    } finally {
+      setIsSaving(false);
+      setIsSaveMenuOpen(false);
+    }
+  }
+
   async function handleSubmit() {
     try {
       const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-      const payload = {
-        data: parsed,
-        options: {
-          api_debug: apiDebug,
-          skip,
-          limit,
-          nb_chunks: numChunks,
-          nb_workers: numWorkers,
-        }
+      const baseQuery = {
+        api_debug: Boolean(apiDebug),
+        skip,
+        limit,
+        ref_ademe: refAdeme,
+      } as Record<string, unknown>;
+      const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
+      const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
+      const body = {
+        redis_db: 1,
+        task: "tasks.ext_o3cl_managing.direct_scenarios",
+        args: {
+          ref_ademe: refAdeme,
+          query,
+        },
       };
       setSubmitting(true);
-      // Example: send with Authorization Bearer header if available
       try {
-        // Replace "/api/simulate" with your real endpoint
-        await authorizedFetch("/api/simulate", {
+        // Use plain fetch to avoid adding Authorization header
+        const res = await fetch(lambdaUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
         });
-        message.success("Submitted simulation payload");
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${txt}`);
+        }
+        message.success("Submitted simulation");
+        if (refAdeme) {
+          startPollingForResults(refAdeme, "dev_report_o3cl");
+        }
       } catch (e) {
         message.error("Failed to submit");
       } finally {
         setSubmitting(false);
         // eslint-disable-next-line no-console
-        console.log("simulation payload", payload);
+        console.log("simulation payload", body);
       }
     } catch (err) {
       message.error("Invalid JSON");
@@ -346,35 +455,77 @@ export const App: React.FC = () => {
                 }}
               />
             </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
-              <div style={{ position: "relative" }}>
-                <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
-                {isSaveMenuOpen && (
-                  <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
-                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => {
-                      try {
-                        const key = `simul:${simulLog || "default"}`;
-                        localStorage.setItem(key, jsonText);
-                        message.success(`saved ${simulLog || "default"}`);
-                      } catch { message.error("save failed"); }
-                      setIsSaveMenuOpen(false);
-                    }}>save {simulLog || "default"}</div>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                <div style={{ position: "relative" }}>
+                  <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
+                  {isSaveMenuOpen && (
+                    <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsScenariosOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
                     <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
-                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => {
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={() => { if (!isSaving) handleSaveToBackoffice(); }}>save {simulLog || "default"}</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={async () => {
+                      if (isSaving) return;
                       const name = window.prompt("Save as name:", simulLog || "custom");
                       if (!name) { setIsSaveMenuOpen(false); return; }
                       try {
-                        const key = `simul:${name}`;
-                        localStorage.setItem(key, jsonText);
+                        const ref = `${refAdeme || "unknown"}-${name}`;
+                        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+                        const apiUrl = new URL("/backoffice/redis_file_manage", base);
+                        setIsSaving(true);
+                        // eslint-disable-next-line no-console
+                        console.debug("[simulation] POST redis_file_manage (save as)", { url: apiUrl.toString(), ref });
+                        const res = await authorizedFetch(apiUrl.toString(), {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Accept: "application/json, text/plain, */*",
+                            "x-authorization": "dperdition",
+                          },
+                          body: JSON.stringify({ ref, text: jsonText }),
+                        });
+                        if (!res.ok) {
+                          const txt = await res.text().catch(() => "");
+                          throw new Error(`HTTP ${res.status} ${txt}`);
+                        }
                         message.success(`saved ${name}`);
-                      } catch { message.error("save failed"); }
-                      setIsSaveMenuOpen(false);
+                      } catch {
+                        message.error("save failed");
+                      } finally {
+                        setIsSaving(false);
+                        setIsSaveMenuOpen(false);
+                      }
                     }}>save as…</div>
-                  </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", minHeight: 24 }}>
+                {!resultsUrl && isPolling && (
+                  <Spin size="small" />
+                )}
+                {resultsUrl && (
+                  <a href={resultsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Open simulation results <ExportOutlined />
+                  </a>
                 )}
               </div>
             </div>
+            <SimulationScenariosModal
+              open={isScenariosOpen}
+              onCancel={() => setIsScenariosOpen(false)}
+              onLoad={(runs) => {
+                try {
+                  setJsonText(JSON.stringify(runs, null, 2));
+                } catch {
+                  // fallback to empty array
+                  setJsonText(JSON.stringify([], null, 2));
+                }
+                setIsScenariosOpen(false);
+              }}
+            />
           </Card>
         </Col>
 

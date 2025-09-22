@@ -14,7 +14,8 @@
     "react-dom": "^18.2.0",
     "antd": "^5.27.4",
     "@ant-design/icons": "^6.0.2",
-    "@acme/top-menu": "workspace:*"
+    "@acme/top-menu": "workspace:*",
+    "@acme/simulation-scenarios": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
