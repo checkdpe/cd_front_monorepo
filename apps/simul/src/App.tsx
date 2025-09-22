@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
-import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
+import { DpeDrawerEditor } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 
@@ -31,6 +32,8 @@ export const App: React.FC = () => {
   const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  function openEditor() { setIsEditorOpen(true); }
 
   useEffect(() => {
     let isCancelled = false;
@@ -495,7 +498,10 @@ export const App: React.FC = () => {
       <Row gutter={[16, 16]}>
         <Col xs={0} lg={4}></Col>
         <Col xs={24} lg={16}>
-          <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+            <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
+          </div>
           <Paragraph style={{ color: "#4b5563", marginTop: 4 }}>Provide JSON and configure options, then submit.</Paragraph>
           
           <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
@@ -618,6 +624,13 @@ export const App: React.FC = () => {
                   </a>
                 )}
               </div>
+              <DpeDrawerEditor
+                open={isEditorOpen}
+                onClose={() => setIsEditorOpen(false)}
+                width="40%"
+                rootJsonText={jsonText}
+                onApply={(next) => setJsonText(next)}
+              />
             </div>
             <SimulationScenariosModal
               open={isScenariosOpen}
