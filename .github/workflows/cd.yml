@@ -1,0 +1,120 @@
+name: CD
+
+on: [pull_request]
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: staging
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.FR_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.FR_AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ 'eu-west-3' }}
+
+
+    steps:
+    - name: Set Distribution Reference Based on Base Branch
+      run: |
+        # Determine target branch for PR vs push events
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+        else
+          TARGET_BRANCH="${{ github.ref_name }}"
+        fi
+
+        if [ "$TARGET_BRANCH" = "main" ]; then
+          echo "Deploying to dev"
+          echo "LD_ENV=dev" >> $GITHUB_ENV
+          echo "DISTRIBUTION=E1J0K624XBLCWV" >> $GITHUB_ENV
+          echo "S3_BUCKET=bo.scandpe.fr" >> $GITHUB_ENV
+        elif [ "$TARGET_BRANCH" = "staging" ]; then
+          echo "Deploying to staging"
+          echo "LD_ENV=staging" >> $GITHUB_ENV
+          echo "DISTRIBUTION=E1J0K624XBLCWV" >> $GITHUB_ENV
+          echo "S3_BUCKET=bo.scandpe.fr" >> $GITHUB_ENV
+        elif [ "$TARGET_BRANCH" = "dev" ]; then
+          echo "Deploying to dev"
+          echo "LD_ENV=dev" >> $GITHUB_ENV
+          echo "DISTRIBUTION=E1J0K624XBLCWV" >> $GITHUB_ENV
+          echo "S3_BUCKET=bo.scandpe.fr" >> $GITHUB_ENV
+        else
+          echo "No deployment for this branch"
+        fi
+
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'pnpm'
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9.12.0
+        run_install: false
+
+    - name: Set up AWS CLI-FR
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.FR_AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.FR_AWS_SECRET_ACCESS_KEY }}
+        aws-region: eu-west-3
+
+    - name: Get caller identity
+      id: aws_account
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+        echo "AWS account: $ACCOUNT_ID"
+        echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+        echo "AWS_ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+    
+    - name: Init env
+      run: cp .env.$LD_ENV .env
+
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Build packages and apps
+      run: |
+        pnpm -r --filter ./packages/* run build
+        pnpm -r --filter ./apps/* run build
+
+    - name: Get Commit Message
+      id: commit_message
+      run: echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+
+    - name: Upload apps to S3
+      run: |
+        set -e
+        apps=("landing" "dashboard" "dataviz" "simul" "auth")
+        for app in "${apps[@]}"; do
+          if [ -d "apps/$app/dist" ]; then
+            echo "Uploading apps/$app/dist to s3://$S3_BUCKET/$app/"
+            aws s3 sync "apps/$app/dist/" "s3://$S3_BUCKET/$app/" --delete
+          else
+            echo "Skip $app: dist not found"
+          fi
+        done
+
+
+    - name: Create invalidation (CloudFront)
+      run: |
+        aws cloudfront create-invalidation --distribution-id $DISTRIBUTION --paths "/*"
+
+    - name: Get Commit Hash
+      id: commit_hash
+      run: echo "hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Tag distribution (CloudFront)
+      run: |   
+        commit_hash=$(git rev-parse HEAD)
+        commit_hash2=${{ steps.commit_hash.outputs.hash }}
+        dayhour=$(date +%Y-%m-%d--+%Hh)
+        aws cloudfront tag-resource --resource "arn:aws:cloudfront::$AWS_ACCOUNT_ID:distribution/$DISTRIBUTION" --tags "Items=[{Key=commitHash,Value=$commit_hash},{Key=dayHour,Value=$dayhour}]"

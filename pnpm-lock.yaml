@@ -232,7 +232,7 @@ importers:
         specifier: ^5.4.0
         version: 5.4.20(@types/node@20.19.17)(sass-embedded@1.93.0)(sass@1.93.0)
 
-  apps/simulation:
+  apps/simul:
     dependencies:
       '@acme/simulation-scenarios':
         specifier: workspace:*

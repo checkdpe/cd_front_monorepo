@@ -5,3 +5,4 @@ packages/mon-dpe/.env
 dist/
 apps/auth/.env
 apps/simulation/.env
+apps/simul/.env
