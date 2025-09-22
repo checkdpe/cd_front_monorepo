@@ -8,6 +8,7 @@ export const SessionBridge: React.FC = () => {
       let isAuthenticated = false;
       let username: string | undefined;
       let email: string | undefined;
+      let accessToken: string | undefined;
       try {
         const user = await getCurrentUser();
         username = user?.username || undefined;
@@ -22,6 +23,10 @@ export const SessionBridge: React.FC = () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const hasToken = Boolean((session as any)?.tokens?.accessToken);
         isAuthenticated = hasToken;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          accessToken = (session as any)?.tokens?.accessToken?.toString?.();
+        } catch {}
         // fallback email from id token claim
         if (!email) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,6 +40,7 @@ export const SessionBridge: React.FC = () => {
           isAuthenticated,
           username,
           email,
+          accessToken,
           authOrigin: window.location.origin,
         },
       };

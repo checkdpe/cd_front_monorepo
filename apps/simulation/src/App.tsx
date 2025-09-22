@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
-import { authorizedFetch } from "./auth";
+import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
+import { Hub } from "aws-amplify/utils";
 import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message } from "antd";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
@@ -17,6 +18,8 @@ export const App: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
   const [bridgeReady, setBridgeReady] = useState<boolean>(false);
+  const [bridgeAuthenticated, setBridgeAuthenticated] = useState<boolean>(false);
+  const hasInitFetchedRef = useRef<boolean>(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -32,6 +35,10 @@ export const App: React.FC = () => {
           return;
         }
         setBridgeReady(true);
+        const isAuthenticated = Boolean(payload?.data?.isAuthenticated);
+        const tokenFromBridge = (payload?.data?.accessToken as string | undefined) || undefined;
+        if (tokenFromBridge) setBridgeAccessToken(tokenFromBridge);
+        if (isAuthenticated) setBridgeAuthenticated(true);
         const emailFromBridge = (payload?.data?.email as string | undefined) || (payload?.data?.username as string | undefined);
         if (!isCancelled && emailFromBridge) {
           setUserEmail((prev) => prev || emailFromBridge);
@@ -96,6 +103,131 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  // Also try firing when bridge reports authenticated (helps cross-port first load)
+  useEffect(() => {
+    if (!bridgeAuthenticated || hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) return;
+        if (hasInitFetchedRef.current) return;
+        hasInitFetchedRef.current = true;
+        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", refAdeme);
+        apiUrl.searchParams.set("log", (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl");
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail (bridge)", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail (bridge)", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed (bridge)", err);
+      }
+    })();
+    return () => controller.abort();
+  }, [bridgeAuthenticated]);
+
+  // On init: if URL contains ?ref_ademe=..., call backoffice endpoint (Bearer included when available)
+  useEffect(() => {
+    if (hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const apiUrl = new URL("/backoffice/get_redis_detail", base);
+    apiUrl.searchParams.set("ref_ademe", refAdeme);
+    apiUrl.searchParams.set("log", (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl");
+
+    async function doFetchOnce() {
+      if (hasInitFetchedRef.current) return;
+      hasInitFetchedRef.current = true;
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    }
+
+    (async () => {
+      try {
+        // Wait for a valid access token before calling the endpoint
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) {
+          // eslint-disable-next-line no-console
+          console.warn("[simulation] skipping get_redis_detail: no Cognito token available");
+          return; // we'll rely on auth Hub events below if sign-in happens later
+        }
+        await doFetchOnce();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    })();
+
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh"){ doFetchOnce(); }
+      } catch {}
+    });
+
+    // Poll as a safety net in case Hub events fired before subscribe
+    const pollId = window.setInterval(async () => {
+      try {
+        if (hasInitFetchedRef.current) { window.clearInterval(pollId); return; }
+        const token = await getAccessToken();
+        if (token) {
+          window.clearInterval(pollId);
+          await doFetchOnce();
+        }
+      } catch {}
+    }, 500);
+
+    return () => {
+      try { (removeHub as any)?.(); } catch {}
+      try { window.clearInterval(pollId); } catch {}
+      controller.abort();
+    };
+  }, []);
+
   const apiDebugOptions = useMemo(() => [
     { label: "none", value: undefined },
     { label: "1", value: 1 },
@@ -155,7 +287,12 @@ export const App: React.FC = () => {
       {/* Invisible iframe to pull session from auth origin when on different ports */}
       {!bridgeReady && (
         <iframe
-          src={(import.meta.env.VITE_AUTH_URL || "/auth").replace(/\/$/, "") + "/session-bridge"}
+          src={(() => {
+            const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+            if (configured) return configured.replace(/\/$/, "") + "/session-bridge";
+            if (window.location.hostname === "localhost") return "http://localhost:5173/session-bridge";
+            return "/auth/session-bridge";
+          })()}
           style={{ display: "none" }}
           title="session-bridge"
         />
@@ -168,7 +305,7 @@ export const App: React.FC = () => {
         </Col>
 
         <Col xs={24} lg={16}>
-          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} bodyStyle={{ padding: 16 }}>
+          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
             <div style={{ display: "grid" }}>
               <textarea
                 value={jsonText}
@@ -193,7 +330,7 @@ export const App: React.FC = () => {
         </Col>
 
         <Col xs={24} lg={8}>
-          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} bodyStyle={{ padding: 16 }}>
+          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
               <div>
                 <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
