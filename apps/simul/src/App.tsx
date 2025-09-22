@@ -534,7 +534,7 @@ export const App: React.FC = () => {
             </div>
             <div style={{ marginTop: 12 }}>
               <Collapse
-                destroyInactivePanel
+                destroyOnHidden
                 items={[
                   {
                     key: "options",
