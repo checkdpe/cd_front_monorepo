@@ -1,0 +1,60 @@
+{
+    "runs": [
+        {
+            "elements_variant": "dpe.logement.enveloppe.plancher_haut_collection.plancher_haut",
+            "scope_strategy": "all",
+            "parameters": {
+                "unit": "cm",
+                "input_forced": {
+                    "donnee_entree.enum_type_isolation_id": {
+                        "set": 3
+                    },
+                    "donnee_entree.enum_methode_saisie_u_id": {
+                        "set": 3
+                    }
+                }
+            },
+            "scenarios": [
+                {
+                    "id": 1,
+                    "input": {
+                        "donnee_entree.epaisseur_isolation": {
+                            "set": 0
+                        }
+                    },
+                    "cost": {
+                        "donnee_entree.surface_paroi_opaque": {
+                            "multiply": 10
+                        }
+                    }
+                },
+                {
+                    "id": 85,
+                    "input": {
+                        "donnee_entree.epaisseur_isolation": {
+                            "set": 20
+                        }
+                    },
+                    "cost": {
+                        "donnee_entree.surface_paroi_opaque": {
+                            "multiply": 90
+                        }
+                    }
+                },
+                {
+                    "id": 88,
+                    "input": {
+                        "donnee_entree.epaisseur_isolation": {
+                            "set": 30
+                        }
+                    },
+                    "cost": {
+                        "donnee_entree.surface_paroi_opaque": {
+                            "multiply": 150
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}

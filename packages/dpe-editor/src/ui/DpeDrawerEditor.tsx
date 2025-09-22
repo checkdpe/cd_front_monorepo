@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
-import { fetchSimulationDpeFullJson } from "../api";
+import { fetchSimulationDpeFullJson, fetchSimulationTemplateJson } from "../api";
 
 export type DpeDrawerEditorProps = {
   open: boolean;
@@ -46,15 +46,17 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     bas: { increments: [0, 10, 30], priceVar: [0, 100, 150], priceFix: [0, 0, 0], incrementUnit: "cm", priceUnit: "EUR/m2" },
   });
 
-  const [colSettings, setColSettings] = useState<{ open: boolean; variant: VariantKey | null; field: "increments" | "priceVar" | "priceFix" | null; tempUnit: string; tempKey: string }>({
+  const [colSettings, setColSettings] = useState<{ open: boolean; variant: VariantKey | null; field: "increments" | "priceVar" | "priceFix" | null; tempUnit: string; tempKey: string; tempForcedInputs: string }>({
     open: false,
     variant: null,
     field: null,
     tempUnit: "",
     tempKey: "",
+    tempForcedInputs: "",
   });
 
   const [mappingKeys, setMappingKeys] = useState<Record<VariantKey, { inputKey?: string; costKey?: string }>>({ haut: {}, bas: {} });
+  const [forcedInputs, setForcedInputs] = useState<Record<VariantKey, string>>({ haut: "{\n}\n", bas: "{\n}\n" });
   const originalJsonRef = useRef<string>("");
   const [scenarioEnabled, setScenarioEnabled] = useState<Record<VariantKey, boolean[]>>({ haut: [], bas: [] });
   const [scopeStrategy, setScopeStrategy] = useState<Record<VariantKey, "all" | "explode">>({ haut: "all", bas: "all" });
@@ -66,11 +68,18 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       try {
         const token = await getAccessToken();
         if (!token) return;
-        const data: any = await fetchSimulationDpeFullJson({
-          baseUrl: apiLoadParams.baseUrl,
-          ref_ademe: apiLoadParams.ref_ademe,
-          accessToken: token,
-        });
+        const [data, template]: any[] = await Promise.all([
+          fetchSimulationDpeFullJson({
+            baseUrl: apiLoadParams.baseUrl,
+            ref_ademe: apiLoadParams.ref_ademe,
+            accessToken: token,
+          }),
+          fetchSimulationTemplateJson({
+            baseUrl: apiLoadParams.baseUrl,
+            ref_ademe: apiLoadParams.ref_ademe,
+            accessToken: token,
+          }),
+        ]);
         if (!isCancelled) {
           onLoadedFromApi?.(data);
           try {
@@ -101,6 +110,28 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               payload: item,
             }));
             setAvailableOptions({ haut: nextHaut, bas: nextBas });
+
+            // Seed defaults from template: parameters.unit and parameters.input_forced per elements_variant
+            try {
+              const runsTpl: any[] = Array.isArray(template?.runs) ? template.runs : [];
+              (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+                const vtpl = editorVariants[k];
+                const variantPath = `dpe.logement.enveloppe.${vtpl.collection}.${vtpl.itemKey}`;
+                const tplEntry = runsTpl.find((r) => r && r.elements_variant === variantPath) || {};
+                const params = tplEntry.parameters || {};
+                const unit = typeof params.unit === "string" ? params.unit : undefined;
+                if (unit) {
+                  setPricing((prev) => ({ ...prev, [k]: { ...prev[k], incrementUnit: unit } }));
+                }
+                const forced = params.input_forced && typeof params.input_forced === "object" ? params.input_forced : undefined;
+                if (forced) {
+                  try {
+                    const pretty = JSON.stringify(forced, null, 2) + "\n";
+                    setForcedInputs((prev) => ({ ...prev, [k]: pretty }));
+                  } catch {}
+                }
+              });
+            } catch {}
           } catch {
             setAvailableOptions({ haut: [], bas: [] });
           }
@@ -352,6 +383,30 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   useEffect(() => {
     if (!open) return;
     try {
+      // Also sync parameters.unit and parameters.input_forced
+      try {
+        let parsedAll: any = [];
+        try { parsedAll = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsedAll = []; }
+        const runsAll: any[] = Array.isArray(parsedAll) ? parsedAll : [];
+        (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+          const v = editorVariants[k];
+          const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+          const entry = runsAll.find((r) => r && r.elements_variant === variantPath) || {};
+          const params = entry.parameters || {};
+          const unit = typeof params.unit === "string" ? params.unit : undefined;
+          if (unit) {
+            setPricing((prev) => ({ ...prev, [k]: { ...prev[k], incrementUnit: unit } }));
+          }
+          const forced = params.input_forced && typeof params.input_forced === "object" ? params.input_forced : undefined;
+          if (forced) {
+            try {
+              const pretty = JSON.stringify(forced, null, 2) + "\n";
+              setForcedInputs((prev) => ({ ...prev, [k]: pretty }));
+            } catch {}
+          }
+        });
+      } catch {}
+
       (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
         const derived = deriveVariantPricing(k);
         setPricing((prev) => {
@@ -409,7 +464,21 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       while (entry.scenarios.length <= idx) entry.scenarios.push(null);
       if (enabled) {
         const current = entry.scenarios[idx];
-        entry.scenarios[idx] = current && typeof current === "object" ? current : { id: idx + 1, input: {}, cost: {} };
+        const next = current && typeof current === "object" ? current : { id: idx + 1, input: {}, cost: {} };
+        // Apply forced inputs without overriding existing primary mapped input
+        try {
+          const forcedText = forcedInputs[variantKey] || "";
+          const forcedObj = forcedText.trim() ? JSON.parse(forcedText) : {};
+          if (forcedObj && typeof forcedObj === "object") {
+            if (!next.input || typeof next.input !== "object") next.input = {};
+            const primaryKey = mappingKeys[variantKey]?.inputKey || getFirstScenarioInputKey(variantKey) || undefined;
+            Object.entries(forcedObj).forEach(([k, val]) => {
+              if (k === primaryKey && next.input && next.input[k] != null) return;
+              if (next.input && next.input[k] == null) next.input[k] = val;
+            });
+          }
+        } catch {}
+        entry.scenarios[idx] = next;
       } else {
         entry.scenarios[idx] = null;
       }
@@ -457,6 +526,17 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           try { return pricing[variantKey].increments[updateScenarioIndex]; } catch { return scenarioValue; }
         })();
         sc.input[key] = { set: typeof scenarioValue === "number" ? scenarioValue : fallbackVal };
+        // Merge forced inputs without overriding the primary key we just set
+        try {
+          const forcedText = forcedInputs[variantKey] || "";
+          const forcedObj = forcedText.trim() ? JSON.parse(forcedText) : {};
+          if (forcedObj && typeof forcedObj === "object") {
+            Object.entries(forcedObj).forEach(([k, val]) => {
+              if (k === key) return; // don't override primary increment input
+              if (sc.input[k] == null) sc.input[k] = val;
+            });
+          }
+        } catch {}
         entry.scenarios[updateScenarioIndex] = sc;
       }
 
@@ -617,17 +697,17 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Increment</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[k].incrementUnit})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "increments", tempUnit: pricing[k].incrementUnit, tempKey: mappingKeys[k]?.inputKey || getFirstScenarioInputKey(k) || "" })} />
+                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "increments", tempUnit: pricing[k].incrementUnit, tempKey: mappingKeys[k]?.inputKey || getFirstScenarioInputKey(k) || "", tempForcedInputs: forcedInputs[k] || "{\n}\n" })} />
                   </div>
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Price var</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[k].priceUnit})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "priceVar", tempUnit: pricing[k].priceUnit, tempKey: mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "" })} />
+                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "priceVar", tempUnit: pricing[k].priceUnit, tempKey: mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "", tempForcedInputs: "" })} />
                   </div>
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Price fix</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[k].priceUnit})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "priceFix", tempUnit: pricing[k].priceUnit, tempKey: mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "" })} />
+                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: k, field: "priceFix", tempUnit: pricing[k].priceUnit, tempKey: mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "", tempForcedInputs: "" })} />
                   </div>
 
                   {(() => {
@@ -752,12 +832,27 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       <Modal
         title="Column settings"
         open={colSettings.open}
-        onCancel={() => setColSettings({ open: false, variant: null, field: null, tempUnit: "", tempKey: "" })}
+        onCancel={() => setColSettings({ open: false, variant: null, field: null, tempUnit: "", tempKey: "", tempForcedInputs: "" })}
         onOk={() => {
           try {
             if (!colSettings.variant || !colSettings.field) return;
             const variant = colSettings.variant;
             const field = colSettings.field;
+            if (field === "increments") {
+              const text = (colSettings.tempForcedInputs || "").trim();
+              if (text) {
+                try {
+                  const parsed = JSON.parse(text);
+                  const pretty = JSON.stringify(parsed, null, 2) + "\n";
+                  setForcedInputs((prev) => ({ ...prev, [variant]: pretty }));
+                } catch {
+                  message.error("Invalid JSON in Forced inputs");
+                  return;
+                }
+              } else {
+                setForcedInputs((prev) => ({ ...prev, [variant]: "" }));
+              }
+            }
             setPricing((prev) => {
               const current = prev[variant];
               if (field === "increments") {
@@ -770,8 +865,36 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               if (field === "increments") return { ...prev, [variant]: { ...current, inputKey: colSettings.tempKey || current.inputKey } };
               return { ...prev, [variant]: { ...current, costKey: colSettings.tempKey || current.costKey } };
             });
+
+            // Persist parameters into JSON for the variant when editing increments
+            if (field === "increments") {
+              try {
+                let parsed: any = [];
+                try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                const v = editorVariants[variant];
+                const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+                let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                if (!entry) {
+                  entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                  runs.push(entry);
+                }
+                if (!entry.parameters || typeof entry.parameters !== "object") entry.parameters = {};
+                if (colSettings.tempUnit) entry.parameters.unit = colSettings.tempUnit;
+                const text = (colSettings.tempForcedInputs || "").trim();
+                if (text) {
+                  try {
+                    const forcedObj = JSON.parse(text);
+                    if (forcedObj && typeof forcedObj === "object") {
+                      entry.parameters.input_forced = forcedObj;
+                    }
+                  } catch {}
+                }
+                onApply(JSON.stringify(runs, null, 2));
+              } catch {}
+            }
           } finally {
-            setColSettings({ open: false, variant: null, field: null, tempUnit: "", tempKey: "" });
+            setColSettings({ open: false, variant: null, field: null, tempUnit: "", tempKey: "", tempForcedInputs: "" });
           }
         }}
       >
@@ -798,6 +921,18 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               placeholder="e.g. cm or EUR/m2"
             />
           </div>
+          {colSettings.field === "increments" ? (
+            <div>
+              <div style={{ marginBottom: 6, color: "#4b5563" }}>Forced inputs (JSON)</div>
+              <Input.TextArea
+                value={colSettings.tempForcedInputs}
+                onChange={(e) => setColSettings((prev) => ({ ...prev, tempForcedInputs: e.target.value }))}
+                rows={3}
+                placeholder="{\n}\n"
+                style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace" }}
+              />
+            </div>
+          ) : null}
         </Space>
       </Modal>
     </Drawer>
