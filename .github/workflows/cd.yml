@@ -93,10 +93,18 @@ jobs:
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
 
-    - name: Build packages and apps
+    - name: Build all workspaces
       run: |
-        pnpm -r --filter ./packages/* run build
-        pnpm -r --filter ./apps/* run build
+        set -e
+        pnpm -r run build
+        echo "Verify dist folders"
+        for app in simul auth; do
+          if [ -d "apps/$app/dist" ]; then
+            echo "Found dist for $app"
+          else
+            echo "Missing dist for $app" >&2
+          fi
+        done
 
     - name: Get Commit Message
       id: commit_message
