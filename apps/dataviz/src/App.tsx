@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { TopMenu } from "@acme/top-menu";
 import * as d3 from "d3";
 
 export const App: React.FC = () => {
@@ -39,24 +40,24 @@ export const App: React.FC = () => {
       .append("g")
       .attr("transform", `translate(0,${height - margin.bottom})`)
       .call(d3.axisBottom(x))
-      .call((g) => g.selectAll("text").attr("dy", "0.8em"));
+      .call((g: d3.Selection<SVGGElement, unknown, null, undefined>) => g.selectAll("text").attr("dy", "0.8em"));
 
     svg
       .append("g")
       .attr("transform", `translate(${margin.left},0)`)
       .call(d3.axisLeft(y))
-      .call((g) => g.selectAll("text").attr("dx", "-0.4em"));
+      .call((g: d3.Selection<SVGGElement, unknown, null, undefined>) => g.selectAll("text").attr("dx", "-0.4em"));
 
     svg
       .append("g")
-      .selectAll("rect")
-      .data(data)
+      .selectAll<SVGRectElement, number>("rect")
+      .data<number>(data)
       .enter()
       .append("rect")
-      .attr("x", (_, i) => x(String(i + 1))!)
-      .attr("y", (d) => y(d))
+      .attr("x", (_: number, i: number) => x(String(i + 1))!)
+      .attr("y", (d: number) => y(d))
       .attr("width", x.bandwidth())
-      .attr("height", (d) => y(0) - y(d))
+      .attr("height", (d: number) => y(0) - y(d))
       .attr("fill", "#4e79a7");
 
     return () => {
@@ -65,9 +66,12 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ minHeight: "100vh", padding: 24 }}>
-      <h1 style={{ marginBottom: 12 }}>Basic D3 Bar Chart</h1>
-      <div ref={containerRef} />
+    <div style={{ minHeight: "100vh" }}>
+      <TopMenu />
+      <div style={{ padding: 24 }}>
+        <h1 style={{ marginBottom: 12 }}>Basic D3 Bar Chart</h1>
+        <div ref={containerRef} />
+      </div>
     </div>
   );
 };

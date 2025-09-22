@@ -1,5 +1,5 @@
 {
-  "name": "@acme/dashboard",
+  "name": "@acme/simulation",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,22 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@acme/mon-dpe": "workspace:*",
-    "@acme/button": "workspace:*",
-    "@acme/theme-tokens": "workspace:*",
-    "@acme/top-menu": "workspace:*",
-    "@ant-design/icons": "^6.0.2",
-    "antd": "^5.27.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "antd": "^5.27.4",
+    "@ant-design/icons": "^6.0.2",
+    "@acme/top-menu": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "typescript": "^5.5.4",
-    "vite": "^5.4.0",
-    "sass": "^1.78.0"
+    "vite": "^5.4.0"
   }
 }
 
