@@ -297,7 +297,7 @@ export const App: React.FC = () => {
     activePollAbortRef.current = { cancel: () => { cancelled = true; setIsPolling(false); } };
 
     const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
-    const resultsHref = `https://bo.scandpe.fr/simul/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
+    const resultsHref = `https://bo.scandpe.fr/simulation/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
 
     setIsPolling(true);
     const tick = async () => {
