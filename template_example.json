@@ -55,6 +55,39 @@
                     }
                 }
             ]
+        },
+        {
+            "elements_variant": "dpe.logement.enveloppe.mur_collection.mur",
+            "scope_strategy": "explode",
+            "parameters": {
+                "unit": "cm",
+                "input_forced": {
+                    "donnee_entree.enum_type_isolation_id": {
+                        "set": 3
+                    },
+                    "donnee_entree.enum_methode_saisie_u_id": {
+                        "set": 3
+                    }
+                }
+            },
+            "scenarios": [
+                {
+                    "id": 2,
+                    "input": {
+                        "donnee_entree.epaisseur_isolation": {
+                            "set": 5
+                        }
+                    }
+                },
+                {
+                    "id": 3,
+                    "input": {
+                        "donnee_entree.epaisseur_isolation": {
+                            "set": 10
+                        }
+                    }
+                }
+            ]
         }
     ]
 }

@@ -60,6 +60,12 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const originalJsonRef = useRef<string>("");
   const [scenarioEnabled, setScenarioEnabled] = useState<Record<VariantKey, boolean[]>>({ haut: [], bas: [] });
   const [scopeStrategy, setScopeStrategy] = useState<Record<VariantKey, "all" | "explode">>({ haut: "all", bas: "all" });
+  const [templateRuns, setTemplateRuns] = useState<any[]>([]);
+  const [templateDerived, setTemplateDerived] = useState<Record<VariantKey, { increments: number[]; priceVar: number[] }>>({
+    haut: { increments: [], priceVar: [] },
+    bas: { increments: [], priceVar: [] },
+  });
+  const [templateScenarioIds, setTemplateScenarioIds] = useState<Record<VariantKey, number[]>>({ haut: [], bas: [] });
   // Fetch from API when the drawer opens if configured
   useEffect(() => {
     if (!open || !apiLoadParams || !getAccessToken) return;
@@ -114,6 +120,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
             // Seed defaults from template: parameters.unit and parameters.input_forced per elements_variant
             try {
               const runsTpl: any[] = Array.isArray(template?.runs) ? template.runs : [];
+              setTemplateRuns(runsTpl);
               (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
                 const vtpl = editorVariants[k];
                 const variantPath = `dpe.logement.enveloppe.${vtpl.collection}.${vtpl.itemKey}`;
@@ -193,6 +200,62 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     }
   }, [open, rootJsonText]);
 
+  function deriveVariantPricingFromRuns(runsArr: any[], variantKey: VariantKey): { increments: number[]; priceVar: number[] } {
+    const empty = { increments: [] as number[], priceVar: [] as number[] };
+    try {
+      const v = editorVariants[variantKey];
+      const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+      const entry = runsArr.find((r) => r && r.elements_variant === variantPath);
+      const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+      if (!scenarios.length) return empty;
+      const inputKey = mappingKeys[variantKey]?.inputKey || getFirstScenarioInputKey(variantKey) || "donnee_entree.epaisseur_isolation";
+      const costKey = mappingKeys[variantKey]?.costKey || getFirstScenarioCostKey(variantKey) || "donnee_entree.surface_paroi_opaque";
+      const increments: number[] = scenarios.map((sc) => {
+        const val = sc?.input?.[inputKey]?.set;
+        const num = typeof val === "number" ? val : Number(val);
+        return Number.isFinite(num) ? num : 0;
+      });
+      const priceVar: number[] = scenarios.map((sc) => {
+        const val = sc?.cost?.[costKey]?.multiply;
+        const num = typeof val === "number" ? val : Number(val);
+        return Number.isFinite(num) ? num : 0;
+      });
+      return { increments, priceVar };
+    } catch {
+      return empty;
+    }
+  }
+
+  // Derive template-based values for disabled scenarios
+  useEffect(() => {
+    try {
+      (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+        const derived = deriveVariantPricingFromRuns(templateRuns, k);
+        setTemplateDerived((prev) => ({ ...prev, [k]: derived }));
+        const v = editorVariants[k];
+        const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+        const entry = (Array.isArray(templateRuns) ? templateRuns : []).find((r) => r && r.elements_variant === variantPath) || {};
+        const ids = Array.isArray(entry?.scenarios) ? entry.scenarios.map((sc: any) => Number(sc?.id)).filter((n: any) => Number.isFinite(n)) : [];
+        setTemplateScenarioIds((prev) => ({ ...prev, [k]: ids }));
+      });
+    } catch {}
+  }, [templateRuns, mappingKeys]);
+
+  function getPresentScenarioIds(variantKey: VariantKey): number[] {
+    try {
+      let parsed: any = [];
+      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+      const v = editorVariants[variantKey];
+      const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+      const entry = runs.find((r) => r && r.elements_variant === variantPath);
+      const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+      return scenarios.map((sc) => Number(sc?.id)).filter((n) => Number.isFinite(n));
+    } catch {
+      return [];
+    }
+  }
+
   const initialState = useMemo((): Record<VariantKey, EditorVariantState> => {
     try {
       const rootRaw = rootJsonText.trim() ? JSON.parse(rootJsonText) : {};
@@ -263,7 +326,84 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
 
   function applyEditorChanges() {
     try {
-      const root = rootJsonText.trim() ? JSON.parse(rootJsonText) : {};
+      let parsedAny: any = rootJsonText.trim() ? JSON.parse(rootJsonText) : {};
+      // If the root is a runs[] array, apply scenario changes there; otherwise apply editor JSON to nested object
+      if (Array.isArray(parsedAny)) {
+        const runs: any[] = parsedAny as any[];
+        (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+          const v = editorVariants[k];
+          const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+          let entry = runs.find((r) => r && r.elements_variant === variantPath);
+          const hasAnyScenario = (scenarioEnabled[k] || []).some(Boolean);
+          if (!entry && hasAnyScenario) {
+            entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: scopeStrategy[k] || "all", scenarios: [] };
+            runs.push(entry);
+          }
+          if (!entry) return;
+          // Keep scope strategy as staged
+          entry.scope_strategy = scopeStrategy[k] || entry.scope_strategy || "all";
+          // Remove any UI-only pricing blocks
+          if (entry.pricing) { try { delete entry.pricing; } catch {} }
+          if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
+
+          const rowCount = Math.max(
+            pricing[k].increments.length,
+            pricing[k].priceVar.length,
+            pricing[k].priceFix.length,
+            (scenarioEnabled[k] || []).length,
+            (templateScenarioIds[k] || []).length
+          );
+          const configuredInputKey = mappingKeys[k]?.inputKey || getFirstScenarioInputKey(k) || "donnee_entree.epaisseur_isolation";
+          const configuredCostKey = mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "donnee_entree.surface_paroi_opaque";
+
+          for (let idx = 0; idx < rowCount; idx += 1) {
+            const enabled = Boolean(scenarioEnabled[k]?.[idx]);
+            if (enabled) {
+              const idFromTemplate = (templateScenarioIds[k] && templateScenarioIds[k][idx] != null) ? Number(templateScenarioIds[k][idx]) : (idx + 1);
+              let targetIndex = entry.scenarios.findIndex((sc: any) => sc && typeof sc === "object" && Number(sc.id) === Number(idFromTemplate));
+              if (targetIndex === -1) targetIndex = idx;
+              while (entry.scenarios.length <= targetIndex) entry.scenarios.push(null);
+              const current = entry.scenarios[targetIndex];
+              const nextSc = current && typeof current === "object" ? current : { id: idFromTemplate, input: {}, cost: {} };
+              if (!nextSc.input || typeof nextSc.input !== "object") nextSc.input = {};
+              if (!nextSc.cost || typeof nextSc.cost !== "object") nextSc.cost = {};
+              const templateInc = Number(templateDerived[k]?.increments?.[idx] ?? NaN);
+              const incFromState = Number(pricing[k].increments[targetIndex] ?? NaN);
+              const incVal = Number.isFinite(incFromState) ? incFromState : (Number.isFinite(templateInc) ? templateInc : 0);
+              nextSc.input[configuredInputKey] = { set: incVal };
+              const forcedText = forcedInputs[k] || "";
+              try {
+                const forcedObj = forcedText.trim() ? JSON.parse(forcedText) : {};
+                if (forcedObj && typeof forcedObj === "object") {
+                  Object.entries(forcedObj).forEach(([fk, fv]) => {
+                    if (fk === configuredInputKey) return;
+                    if (nextSc.input[fk] == null) nextSc.input[fk] = fv;
+                  });
+                }
+              } catch {}
+              const templatePriceVar = Number(templateDerived[k]?.priceVar?.[idx] ?? NaN);
+              const priceVarFromState = Number(pricing[k].priceVar[targetIndex] ?? NaN);
+              const priceVarVal = Number.isFinite(priceVarFromState) ? priceVarFromState : (Number.isFinite(templatePriceVar) ? templatePriceVar : 0);
+              nextSc.cost[configuredCostKey] = { multiply: priceVarVal };
+              entry.scenarios[targetIndex] = nextSc;
+            } else {
+              // Disabled: remove the scenario object entirely
+              const idFromTemplate = (templateScenarioIds[k] && templateScenarioIds[k][idx] != null) ? Number(templateScenarioIds[k][idx]) : (idx + 1);
+              const targetIndex = entry.scenarios.findIndex((sc: any) => sc && typeof sc === "object" && Number(sc.id) === Number(idFromTemplate));
+              if (targetIndex !== -1) {
+                entry.scenarios.splice(targetIndex, 1);
+              }
+            }
+          }
+        });
+        onApply(JSON.stringify(runs, null, 2));
+        message.success("Editor changes applied");
+        onClose();
+        return;
+      }
+
+      // Fallback: nested object editing mode stays unchanged
+      const root = parsedAny && typeof parsedAny === "object" ? parsedAny : {};
       (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
         const v = editorVariants[k];
         const idx = Math.max(0, Math.floor(editorState[k].index || 0));
@@ -448,103 +588,110 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     } catch {}
   }, [open, rootJsonText]);
 
-  function toggleScenarioPresence(variantKey: VariantKey, idx: number, enabled: boolean) {
+  // Initialize scenarioEnabled by comparing template scenario ids with JSON presence (by id)
+  useEffect(() => {
+    if (!open) return;
     try {
-      let parsed: any = [];
-      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-      const runs: any[] = Array.isArray(parsed) ? parsed : [];
-      const v = editorVariants[variantKey];
-      const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
-      let entry = runs.find((r) => r && r.elements_variant === variantPath);
-      if (!entry) {
-        entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-        runs.push(entry);
-      }
-      if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
-      while (entry.scenarios.length <= idx) entry.scenarios.push(null);
-      if (enabled) {
-        const current = entry.scenarios[idx];
-        const next = current && typeof current === "object" ? current : { id: idx + 1, input: {}, cost: {} };
-        // Apply forced inputs without overriding existing primary mapped input
-        try {
-          const forcedText = forcedInputs[variantKey] || "";
-          const forcedObj = forcedText.trim() ? JSON.parse(forcedText) : {};
-          if (forcedObj && typeof forcedObj === "object") {
-            if (!next.input || typeof next.input !== "object") next.input = {};
-            const primaryKey = mappingKeys[variantKey]?.inputKey || getFirstScenarioInputKey(variantKey) || undefined;
-            Object.entries(forcedObj).forEach(([k, val]) => {
-              if (k === primaryKey && next.input && next.input[k] != null) return;
-              if (next.input && next.input[k] == null) next.input[k] = val;
-            });
-          }
-        } catch {}
-        entry.scenarios[idx] = next;
-      } else {
-        entry.scenarios[idx] = null;
-      }
-      onApply(JSON.stringify(runs, null, 2));
-      setScenarioEnabled((prev) => {
-        const current = prev[variantKey] ? prev[variantKey].slice() : [];
-        while (current.length <= idx) current.push(false);
-        current[idx] = enabled;
-        return { ...prev, [variantKey]: current };
+      (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+        const presentIds = new Set<number>(getPresentScenarioIds(k));
+        const ids = templateScenarioIds[k] || [];
+        const flags = ids.map((id) => presentIds.has(Number(id)));
+        if (ids.length) {
+          setScenarioEnabled((prev) => ({ ...prev, [k]: flags }));
+        }
       });
     } catch {}
-  }
+  }, [open, rootJsonText, templateScenarioIds]);
 
-  function updateVariantPricingInJson(
-    variantKey: VariantKey,
-    _override?: { increments?: number[]; priceVar?: number[]; priceFix?: number[]; incrementUnit?: string; priceUnit?: string },
-    updateScenarioIndex?: number,
-    scenarioValue?: number
-  ) {
+  function toggleScenarioPresence(variantKey: VariantKey, idx: number, enabled: boolean) {
     try {
-      let parsed: any = [];
-      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-      const runs: any[] = Array.isArray(parsed) ? parsed : [];
-      const v = editorVariants[variantKey];
-      const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
-      let entry = runs.find((r) => r && r.elements_variant === variantPath);
-      if (!entry) {
-        entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-        runs.push(entry);
-      }
-      // Ensure any previous pricing block is removed from JSON – UI-only feature
-      if (entry.pricing) {
-        try { delete entry.pricing; } catch {}
-      }
-
-      if (typeof updateScenarioIndex === "number") {
-        if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
-        while (entry.scenarios.length <= updateScenarioIndex) {
-          entry.scenarios.push({ id: entry.scenarios.length + 1, input: {} });
+      if (enabled) {
+        let parsed: any = [];
+        try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+        const runs: any[] = Array.isArray(parsed) ? parsed : [];
+        const v = editorVariants[variantKey];
+        const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+        let entry = runs.find((r) => r && r.elements_variant === variantPath);
+        if (!entry) {
+          entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: scopeStrategy[variantKey] || "all", scenarios: [] };
+          runs.push(entry);
         }
-        const sc = entry.scenarios[updateScenarioIndex] || ({} as any);
-        const key = mappingKeys[variantKey]?.inputKey || getFirstScenarioInputKey(variantKey) || "donnee_entree.epaisseur_isolation";
-        if (!sc.input || typeof sc.input !== "object") sc.input = {};
-        const fallbackVal = (() => {
-          try { return pricing[variantKey].increments[updateScenarioIndex]; } catch { return scenarioValue; }
-        })();
-        sc.input[key] = { set: typeof scenarioValue === "number" ? scenarioValue : fallbackVal };
-        // Merge forced inputs without overriding the primary key we just set
+        if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
+        const idFromTemplate = (templateScenarioIds[variantKey] && templateScenarioIds[variantKey][idx] != null)
+          ? Number(templateScenarioIds[variantKey][idx])
+          : (idx + 1);
+        let targetIndex = entry.scenarios.findIndex((sc: any) => sc && typeof sc === "object" && Number(sc.id) === Number(idFromTemplate));
+        if (targetIndex === -1) targetIndex = entry.scenarios.findIndex((sc: any) => sc == null);
+        if (targetIndex === -1) targetIndex = entry.scenarios.length;
+        while (entry.scenarios.length <= targetIndex) entry.scenarios.push(null);
+        const current = entry.scenarios[targetIndex];
+        const configuredInputKey = mappingKeys[variantKey]?.inputKey || getFirstScenarioInputKey(variantKey) || "donnee_entree.epaisseur_isolation";
+        const configuredCostKey = mappingKeys[variantKey]?.costKey || getFirstScenarioCostKey(variantKey) || "donnee_entree.surface_paroi_opaque";
+        const nextSc: any = current && typeof current === "object" ? current : { id: idFromTemplate, input: {}, cost: {} };
+        if (!nextSc.input || typeof nextSc.input !== "object") nextSc.input = {};
+        if (!nextSc.cost || typeof nextSc.cost !== "object") nextSc.cost = {};
+        const tmplInc = Number(templateDerived[variantKey]?.increments?.[idx] ?? NaN);
+        const incFromState = Number(pricing[variantKey]?.increments?.[targetIndex] ?? NaN);
+        const incVal = Number.isFinite(incFromState) ? incFromState : (Number.isFinite(tmplInc) ? tmplInc : 0);
+        nextSc.input[configuredInputKey] = { set: incVal };
         try {
           const forcedText = forcedInputs[variantKey] || "";
           const forcedObj = forcedText.trim() ? JSON.parse(forcedText) : {};
           if (forcedObj && typeof forcedObj === "object") {
-            Object.entries(forcedObj).forEach(([k, val]) => {
-              if (k === key) return; // don't override primary increment input
-              if (sc.input[k] == null) sc.input[k] = val;
+            Object.entries(forcedObj).forEach(([fk, fv]) => {
+              if (fk === configuredInputKey) return;
+              if (nextSc.input[fk] == null) nextSc.input[fk] = fv;
             });
           }
         } catch {}
-        entry.scenarios[updateScenarioIndex] = sc;
+        const tmplPriceVar = Number(templateDerived[variantKey]?.priceVar?.[idx] ?? NaN);
+        const priceVarFromState = Number(pricing[variantKey]?.priceVar?.[targetIndex] ?? NaN);
+        const priceVarVal = Number.isFinite(priceVarFromState) ? priceVarFromState : (Number.isFinite(tmplPriceVar) ? tmplPriceVar : 0);
+        nextSc.cost[configuredCostKey] = { multiply: priceVarVal };
+        nextSc.id = idFromTemplate;
+        entry.scenarios[targetIndex] = nextSc;
+        onApply(JSON.stringify(runs, null, 2));
+        // Update local pricing state so UI reflects chosen values immediately
+        setPricing((prev) => {
+          const current = prev[variantKey];
+          const nextIncs = current.increments.slice();
+          const nextPriceVar = current.priceVar.slice();
+          while (nextIncs.length <= targetIndex) nextIncs.push(0);
+          while (nextPriceVar.length <= targetIndex) nextPriceVar.push(0);
+          nextIncs[targetIndex] = incVal;
+          nextPriceVar[targetIndex] = priceVarVal;
+          return { ...prev, [variantKey]: { ...current, increments: nextIncs, priceVar: nextPriceVar } };
+        });
+      } else {
+        // Immediately remove scenario from JSON by id
+        let parsed: any = [];
+        try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+        const runs: any[] = Array.isArray(parsed) ? parsed : [];
+        const v = editorVariants[variantKey];
+        const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+        const entry = runs.find((r) => r && r.elements_variant === variantPath);
+        if (entry && Array.isArray(entry.scenarios)) {
+          const idFromTemplate = (templateScenarioIds[variantKey] && templateScenarioIds[variantKey][idx] != null)
+            ? Number(templateScenarioIds[variantKey][idx])
+            : (idx + 1);
+          let targetIndex = entry.scenarios.findIndex((sc: any) => sc && typeof sc === "object" && Number(sc.id) === Number(idFromTemplate));
+          if (targetIndex === -1 && idx < entry.scenarios.length) targetIndex = idx;
+          if (targetIndex !== -1) {
+            entry.scenarios.splice(targetIndex, 1);
+            onApply(JSON.stringify(runs, null, 2));
+          }
+        }
       }
-
-      onApply(JSON.stringify(runs, null, 2));
-    } catch {
-      // ignore
-    }
+    } catch {}
+    setScenarioEnabled((prev) => {
+      const current = prev[variantKey] ? prev[variantKey].slice() : [];
+      while (current.length <= idx) current.push(false);
+      current[idx] = enabled;
+      return { ...prev, [variantKey]: current };
+    });
   }
+
+  // (removed immediate JSON writes; apply on OK)
 
   return (
     <Drawer
@@ -584,7 +731,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               {/* index selector removed */}
               {availableOptions[k]?.length ? (
                 <div>
-                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Options from API</div>
+                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Scope</div>
                   <div style={{ display: "grid", gap: 6 }}>
                     {availableOptions[k].map((opt, idx) => (
                       <label
@@ -683,7 +830,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               </div>
               <div style={{ height: 8 }} />
               <div>
-                <div style={{ fontWeight: 500, marginBottom: 6 }}>Pricing</div>
+                <div style={{ fontWeight: 500, marginBottom: 6 }}>Scenarios</div>
                 <div
                   style={{
                     display: "grid",
@@ -711,110 +858,93 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                   </div>
 
                   {(() => {
-                    const rowCount = Math.max(
-                      pricing[k].increments.length,
-                      pricing[k].priceVar.length,
-                      pricing[k].priceFix.length
-                    );
-                    return Array.from({ length: rowCount }).map((_, idx) => {
-                      const incVal = pricing[k].increments[idx] ?? 0;
-                      const priceVarVal = pricing[k].priceVar[idx] ?? 0;
-                      const priceFixVal = pricing[k].priceFix[idx] ?? 0;
+                    const presentIds = getPresentScenarioIds(k);
+                    const presentIdsSet = new Set<number>(presentIds);
+                    const rowIds: number[] = (templateScenarioIds[k] || []).slice();
+                    return rowIds.map((scenarioId, idx) => {
+                      const isPresentInJson = presentIdsSet.has(Number(scenarioId));
+                      const isEnabled = Boolean(scenarioEnabled[k]?.[idx]);
+                      const presentIndex = presentIds.indexOf(Number(scenarioId));
+                      const tmplIdx = idx; // template index aligns with templateDerived
+                      const tmplInc = templateDerived[k]?.increments?.[tmplIdx];
+                      const tmplPriceVar = templateDerived[k]?.priceVar?.[tmplIdx];
+                      const incVal = presentIndex !== -1
+                        ? (pricing[k].increments[presentIndex] ?? 0)
+                        : (Number.isFinite(tmplInc) ? Number(tmplInc) : 0);
+                      const priceVarVal = presentIndex !== -1
+                        ? (pricing[k].priceVar[presentIndex] ?? 0)
+                        : (Number.isFinite(tmplPriceVar) ? Number(tmplPriceVar) : 0);
+                      const priceFixVal = presentIndex !== -1
+                        ? (pricing[k].priceFix[presentIndex] ?? 0)
+                        : 0;
                       return (
                         <React.Fragment key={`row-${idx}`}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#6b7280", fontSize: 12 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: isPresentInJson ? "#6b7280" : "#9ca3af", fontSize: 12 }}>
                             <Checkbox
                               checked={Boolean(scenarioEnabled[k]?.[idx])}
                               onChange={(e) => toggleScenarioPresence(k, idx, e.target.checked)}
                             />
-                            <span>#{idx + 1}</span>
+                            <span>#{scenarioId}</span>
                           </label>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6 }}>
                             <InputNumber
                               size="small"
                               controls={false}
                               min={0}
                               value={incVal}
+                              disabled={!isEnabled}
                               onChange={(next) => {
                                 const nextVal = Number(next ?? 0);
                                 setPricing((prev) => {
                                   const current = prev[k];
                                   const nextIncs = current.increments.slice();
-                                  while (nextIncs.length <= idx) nextIncs.push(0);
-                                  nextIncs[idx] = nextVal;
+                                  const idxToSet = presentIndex !== -1 ? presentIndex : idx;
+                                  while (nextIncs.length <= idxToSet) nextIncs.push(0);
+                                  nextIncs[idxToSet] = nextVal;
                                   return { ...prev, [k]: { ...current, increments: nextIncs } };
                                 });
-                              }}
-                              onBlur={(e) => {
-                                const value = Number((e?.target as HTMLInputElement)?.value ?? incVal);
-                                updateVariantPricingInJson(k, undefined, idx, value);
                               }}
                               style={{ width: "100%" }}
                             />
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6 }}>
                             <InputNumber
                               size="small"
                               controls={false}
                               min={0}
                               value={priceVarVal}
+                              disabled={!isEnabled}
                               onChange={(next) => {
                                 const nextVal = Number(next ?? 0);
                                 setPricing((prev) => {
                                   const current = prev[k];
                                   const nextPrices = current.priceVar.slice();
-                                  while (nextPrices.length <= idx) nextPrices.push(0);
-                                  nextPrices[idx] = nextVal;
+                                  const idxToSet = presentIndex !== -1 ? presentIndex : idx;
+                                  while (nextPrices.length <= idxToSet) nextPrices.push(0);
+                                  nextPrices[idxToSet] = nextVal;
                                   return { ...prev, [k]: { ...current, priceVar: nextPrices } };
                                 });
-                              }}
-                              onBlur={(e) => {
-                                const value = Number((e?.target as HTMLInputElement)?.value ?? priceVarVal);
-                                try {
-                                  let parsed: any = [];
-                                  try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-                                  const runs: any[] = Array.isArray(parsed) ? parsed : [];
-                                  const v = editorVariants[k];
-                                  const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
-                                  let entry = runs.find((r) => r && r.elements_variant === variantPath);
-                                  if (!entry) {
-                                    entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-                                    runs.push(entry);
-                                  }
-                                  if (!Array.isArray(entry.scenarios)) entry.scenarios = [];
-                                  while (entry.scenarios.length <= idx) {
-                                    entry.scenarios.push({ id: entry.scenarios.length + 1, input: {}, cost: {} });
-                                  }
-                                  const sc = entry.scenarios[idx] || ({} as any);
-                                  const configuredCostKey = mappingKeys[k]?.costKey || getFirstScenarioCostKey(k) || "donnee_entree.surface_paroi_opaque";
-                                  if (!sc.cost || typeof sc.cost !== "object") sc.cost = {};
-                                  sc.cost[configuredCostKey] = { multiply: value };
-                                  entry.scenarios[idx] = sc;
-                                  onApply(JSON.stringify(runs, null, 2));
-                                } catch {}
                               }}
                               style={{ width: "100%" }}
                             />
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6 }}>
                             <InputNumber
                               size="small"
                               controls={false}
                               min={0}
                               value={priceFixVal}
+                              disabled={!isEnabled}
                               onChange={(next) => {
                                 const nextVal = Number(next ?? 0);
                                 setPricing((prev) => {
                                   const current = prev[k];
                                   const nextPrices = current.priceFix.slice();
-                                  while (nextPrices.length <= idx) nextPrices.push(0);
-                                  nextPrices[idx] = nextVal;
+                                  const idxToSet = presentIndex !== -1 ? presentIndex : idx;
+                                  while (nextPrices.length <= idxToSet) nextPrices.push(0);
+                                  nextPrices[idxToSet] = nextVal;
                                   return { ...prev, [k]: { ...current, priceFix: nextPrices } };
                                 });
-                              }}
-                              onBlur={(e) => {
-                                const value = Number((e?.target as HTMLInputElement)?.value ?? priceFixVal);
-                                updateVariantPricingInJson(k, undefined, idx, value);
                               }}
                               style={{ width: "100%" }}
                             />
