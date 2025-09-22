@@ -57,6 +57,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const [mappingKeys, setMappingKeys] = useState<Record<VariantKey, { inputKey?: string; costKey?: string }>>({ haut: {}, bas: {} });
   const originalJsonRef = useRef<string>("");
   const [scenarioEnabled, setScenarioEnabled] = useState<Record<VariantKey, boolean[]>>({ haut: [], bas: [] });
+  const [scopeStrategy, setScopeStrategy] = useState<Record<VariantKey, "all" | "explode">>({ haut: "all", bas: "all" });
   // Fetch from API when the drawer opens if configured
   useEffect(() => {
     if (!open || !apiLoadParams || !getAccessToken) return;
@@ -141,6 +142,25 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   }, [open]);
 
   // (no-op)
+
+  // Sync scope strategy from JSON (default to "all")
+  useEffect(() => {
+    try {
+      let parsed: any = [];
+      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+      const next: Record<VariantKey, "all" | "explode"> = { haut: "all", bas: "all" };
+      (Object.keys(editorVariants) as VariantKey[]).forEach((k) => {
+        const v = editorVariants[k];
+        const variantPath = `dpe.logement.enveloppe.${v.collection}.${v.itemKey}`;
+        const entry = runs.find((r) => r && r.elements_variant === variantPath);
+        next[k] = entry?.scope_strategy === "explode" ? "explode" : "all";
+      });
+      setScopeStrategy(next);
+    } catch {
+      // ignore
+    }
+  }, [open, rootJsonText]);
 
   const initialState = useMemo((): Record<VariantKey, EditorVariantState> => {
     try {
@@ -465,7 +485,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           const v = editorVariants[k];
           const st = editorState[k];
           return (
-            <Card key={k} size="small" styles={{ body: { padding: 12 } }}>
+            <Card key={k} size="small" styles={{ body: { padding: 12 } }} style={{ background: st.enabled ? "#ffffff" : "#f5f5f5" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontWeight: 600 }}>{v.label}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -554,6 +574,33 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                   </div>
                 </div>
               ) : null}
+              <div style={{ height: 8 }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                <div style={{ fontWeight: 500 }}>explode</div>
+                <Switch
+                  checked={scopeStrategy[k] === "explode"}
+                  onChange={(checked) => {
+                    try {
+                      let parsed: any = [];
+                      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                      const collectionName = v.collection as "plancher_haut_collection" | "plancher_bas_collection";
+                      const itemKey = v.itemKey as "plancher_haut" | "plancher_bas";
+                      const variantPath = `dpe.logement.enveloppe.${collectionName}.${itemKey}`;
+                      let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                      if (!entry) {
+                        entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                        runs.push(entry);
+                      }
+                      entry.scope_strategy = checked ? "explode" : "all";
+                      onApply(JSON.stringify(runs, null, 2));
+                      setScopeStrategy((prev) => ({ ...prev, [k]: entry.scope_strategy }));
+                    } catch {
+                      message.error("Failed to update scope strategy");
+                    }
+                  }}
+                />
+              </div>
               <div style={{ height: 8 }} />
               <div>
                 <div style={{ fontWeight: 500, marginBottom: 6 }}>Pricing</div>
