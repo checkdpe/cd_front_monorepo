@@ -3,3 +3,5 @@ node_modules
 apps/dashboard/.env
 packages/mon-dpe/.env
 dist/
+apps/auth/.env
+apps/simulation/.env

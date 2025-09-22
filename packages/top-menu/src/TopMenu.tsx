@@ -7,9 +7,10 @@ export interface TopMenuProps {
   logoMobileSrc?: string;
   onAuthClick?: () => void;
   authLabel?: string;
+  authHref?: string;
 }
 
-export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up" }) => {
+export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth" }) => {
   return (
     <div style={{
       position: "sticky",
@@ -27,7 +28,20 @@ export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMob
           </picture>
         </div>
         <button
-          onClick={onAuthClick}
+          onClick={() => {
+            if (onAuthClick) {
+              onAuthClick();
+              return;
+            }
+            try {
+              const url = new URL(authHref, window.location.href);
+              url.searchParams.set("returnTo", window.location.href);
+              window.location.href = url.toString();
+            } catch {
+              const sep = authHref.includes("?") ? "&" : "?";
+              window.location.href = `${authHref}${sep}returnTo=${encodeURIComponent(window.location.href)}`;
+            }
+          }}
           style={{
             appearance: "none",
             border: "1px solid #d1d5db",

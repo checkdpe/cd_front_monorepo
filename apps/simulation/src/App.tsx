@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from "react";
+import "./amplify";
+import { authorizedFetch } from "./auth";
 import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message } from "antd";
 import { TopMenu } from "@acme/top-menu";
 
@@ -19,7 +21,7 @@ export const App: React.FC = () => {
     { label: "2", value: 2 },
   ], []);
 
-  function handleSubmit() {
+  async function handleSubmit() {
     try {
       const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
       const payload = {
@@ -33,13 +35,22 @@ export const App: React.FC = () => {
         }
       };
       setSubmitting(true);
-      // Placeholder submit logic; replace with real API call
-      setTimeout(() => {
-        setSubmitting(false);
+      // Example: send with Authorization Bearer header if available
+      try {
+        // Replace "/api/simulate" with your real endpoint
+        await authorizedFetch("/api/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
         message.success("Submitted simulation payload");
+      } catch (e) {
+        message.error("Failed to submit");
+      } finally {
+        setSubmitting(false);
         // eslint-disable-next-line no-console
         console.log("simulation payload", payload);
-      }, 600);
+      }
     } catch (err) {
       message.error("Invalid JSON");
     }
@@ -48,10 +59,8 @@ export const App: React.FC = () => {
   return (
     <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
       <TopMenu
-        onAuthClick={() => {
-          message.info("Navigate to auth page (to be implemented)");
-        }}
         authLabel="login / sign-up"
+        authHref={import.meta.env.VITE_AUTH_URL || "/auth"}
       />
       <div style={{ padding: 24 }}>
       <Row gutter={[16, 16]}>
