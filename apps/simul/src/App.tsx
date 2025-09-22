@@ -86,6 +86,28 @@ export const App: React.FC = () => {
         }
       } catch {}
 
+      // Fallback #2: decode idToken cookie to extract email claim
+      try {
+        const all = document.cookie.split("; ").filter(Boolean);
+        const prefix = "CognitoIdentityServiceProvider.";
+        for (const cookie of all) {
+          const eq = cookie.indexOf("=");
+          if (eq === -1) continue;
+          const name = cookie.substring(0, eq);
+          if (!name.startsWith(prefix) || !name.endsWith(".idToken")) continue;
+          const raw = decodeURIComponent(cookie.substring(eq + 1));
+          const parts = raw.split(".");
+          if (parts.length >= 2) {
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+            const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
+            if (emailClaim && !isCancelled) {
+              setUserEmail(emailClaim);
+              break;
+            }
+          }
+        }
+      } catch {}
+
       try {
         // Prefer Cognito username (often the email) if available
         const { username } = await getCurrentUser();
@@ -452,14 +474,18 @@ export const App: React.FC = () => {
                 const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
                 const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
                 if (!(isConfiguredLocal && !isPageLocal)) {
-                  return configured.replace(/\/$/, "") + "/session-bridge";
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  const base = endsWithHtml ? configured : (hasTrailingSlash ? configured.replace(/\/$/, "") + "/index.html" : configured + "/index.html");
+                  return base;
                 }
               } catch {
-                return configured.replace(/\/$/, "") + "/session-bridge";
+                return configured.replace(/\/$/, "") + "/index.html";
               }
             }
-            if (window.location.hostname === "localhost") return "http://localhost:5173/session-bridge";
-            return "/auth/session-bridge";
+            if (window.location.hostname === "localhost") return "http://localhost:5173/index.html";
+            return "/auth/index.html";
           })()}
           style={{ display: "none" }}
           title="session-bridge"

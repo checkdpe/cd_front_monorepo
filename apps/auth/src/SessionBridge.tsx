@@ -34,6 +34,33 @@ export const SessionBridge: React.FC = () => {
         }
       } catch {}
 
+      // Cookie fallback when Amplify storage is not readable across origins
+      try {
+        if (!accessToken) {
+          const all = document.cookie.split("; ").filter(Boolean);
+          const prefix = "CognitoIdentityServiceProvider.";
+          for (const part of all) {
+            const eq = part.indexOf("=");
+            if (eq === -1) continue;
+            const key = part.substring(0, eq);
+            if (!key.startsWith(prefix) || !key.endsWith(".LastAuthUser")) continue;
+            const clientId = key.slice(prefix.length, -".LastAuthUser".length);
+            const username = decodeURIComponent(part.substring(eq + 1));
+            if (!clientId || !username) continue;
+            const accessKey = `${prefix}${clientId}.${username}.accessToken`;
+            const match = document.cookie.match(new RegExp(`(?:^|; )${accessKey.replace(/([.$?*|{}()\[\]\\\/\+^])/g, "\\$1")}=([^;]*)`));
+            if (match && match[1]) {
+              const val = decodeURIComponent(match[1]);
+              if (val) {
+                accessToken = val;
+                isAuthenticated = true;
+                break;
+              }
+            }
+          }
+        }
+      } catch {}
+
       const payload = {
         type: "cognito-session-bridge",
         data: {
