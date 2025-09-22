@@ -1,3 +1,23 @@
+# Update json on disabling editor element
+_Exported on 23/09/2025 at 0:55:08 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+from existing json i have a "plancher_haut" set in editor, when i disable this element, it would not update and remove from json
+
+---
+
+**Cursor**
+
+I'll search the editor code for where `plancher_haut` is handled and how disabling/removal is serialized, then inspect the DPE editor component and API save logic.
+
+I'll open the DPE editor component and related API module to locate how disabling an element should remove it from the `runs` JSON and why it isn't happening.
+
+I'll update the top-level Enabled switch in `DpeDrawerEditor.tsx` so toggling it off removes the `elements_variant` entry (like `plancher_haut`) from the runs JSON immediately, and toggling it on creates an empty entry if missing. Then I'll check for any linter issues.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
 import { fetchSimulationDpeFullJson, fetchSimulationTemplateJson } from "../api";
@@ -1111,4 +1131,17 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   );
 };
 
+
+
+```
+
+- I’m going to make disabling the element actually remove it from the runs JSON right away.
+
+I updated the Enabled switch for each variant in `packages/dpe-editor/src/ui/DpeDrawerEditor.tsx`:
+- Turning it off now removes the corresponding `elements_variant` (e.g., `dpe.logement.enveloppe.plancher_haut_collection.plancher_haut`) from the runs array and clears local scenario state.
+- Turning it on creates an empty entry if missing.
+
+Try disabling the “Plancher haut” toggle now; it should remove the entry from the JSON immediately.
+
+- Edit applied in `DpeDrawerEditor.tsx`; no linter errors.
 
