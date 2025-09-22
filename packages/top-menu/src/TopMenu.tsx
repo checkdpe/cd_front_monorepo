@@ -8,9 +8,12 @@ export interface TopMenuProps {
   onAuthClick?: () => void;
   authLabel?: string;
   authHref?: string;
+  isAuthenticated?: boolean;
+  logoutHref?: string;
+  onLogoutClick?: () => void;
 }
 
-export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth" }) => {
+export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth", isAuthenticated = false, logoutHref, onLogoutClick }) => {
   return (
     <div style={{
       position: "sticky",
@@ -27,34 +30,74 @@ export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMob
             <img src={logoSrc} alt="logo" style={{ height: 28, width: "auto" }} />
           </picture>
         </div>
-        <button
-          onClick={() => {
-            if (onAuthClick) {
-              onAuthClick();
-              return;
-            }
-            try {
-              const url = new URL(authHref, window.location.href);
-              url.searchParams.set("returnTo", window.location.href);
-              window.location.href = url.toString();
-            } catch {
-              const sep = authHref.includes("?") ? "&" : "?";
-              window.location.href = `${authHref}${sep}returnTo=${encodeURIComponent(window.location.href)}`;
-            }
-          }}
-          style={{
-            appearance: "none",
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
-            color: "#111827",
-            padding: "6px 12px",
-            borderRadius: 8,
-            fontSize: 14,
-            cursor: "pointer"
-          }}
-        >
-          {authLabel}
-        </button>
+        {isAuthenticated ? (
+          <button
+            onClick={() => {
+              if (onLogoutClick) {
+                onLogoutClick();
+                return;
+              }
+              if (logoutHref) {
+                try {
+                  const url = new URL(logoutHref, window.location.href);
+                  window.location.href = url.toString();
+                } catch {
+                  window.location.href = logoutHref;
+                }
+                return;
+              }
+              // Fallback to auth page if logout link not provided
+              try {
+                const url = new URL(authHref, window.location.href);
+                window.location.href = url.toString();
+              } catch {
+                window.location.href = authHref;
+              }
+            }}
+            style={{
+              appearance: "none",
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              color: "#111827",
+              padding: "6px 12px",
+              borderRadius: 8,
+              fontSize: 14,
+              cursor: "pointer"
+            }}
+            title="Sign out"
+          >
+            {authLabel}
+          </button>
+        ) : (
+          <button
+            onClick={() => {
+              if (onAuthClick) {
+                onAuthClick();
+                return;
+              }
+              try {
+                const url = new URL(authHref, window.location.href);
+                url.searchParams.set("returnTo", window.location.href);
+                window.location.href = url.toString();
+              } catch {
+                const sep = authHref.includes("?") ? "&" : "?";
+                window.location.href = `${authHref}${sep}returnTo=${encodeURIComponent(window.location.href)}`;
+              }
+            }}
+            style={{
+              appearance: "none",
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              color: "#111827",
+              padding: "6px 12px",
+              borderRadius: 8,
+              fontSize: 14,
+              cursor: "pointer"
+            }}
+          >
+            {authLabel}
+          </button>
+        )}
       </div>
     </div>
   );

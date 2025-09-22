@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./amplify";
 import { authorizedFetch } from "./auth";
 import { Button, Card, Col, Flex, InputNumber, Row, Select, Space, Typography, message } from "antd";
 import { TopMenu } from "@acme/top-menu";
+import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 
 const { Title, Paragraph } = Typography;
 
@@ -14,6 +15,86 @@ export const App: React.FC = () => {
   const [numChunks, setNumChunks] = useState<number>(1);
   const [numWorkers, setNumWorkers] = useState<number>(1);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
+  const [bridgeReady, setBridgeReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+    // Listen to session bridge messages from auth app
+    function onMessage(ev: MessageEvent) {
+      try {
+        const payload = ev.data;
+        if (!payload || payload.type !== "cognito-session-bridge") return;
+        const authOrigin = payload?.data?.authOrigin as string | undefined;
+        // Optionally validate origin
+        if (authOrigin && !ev.origin.startsWith(authOrigin)) {
+          // origin mismatch – ignore
+          return;
+        }
+        setBridgeReady(true);
+        const emailFromBridge = (payload?.data?.email as string | undefined) || (payload?.data?.username as string | undefined);
+        if (!isCancelled && emailFromBridge) {
+          setUserEmail((prev) => prev || emailFromBridge);
+        }
+      } catch {}
+    }
+    window.addEventListener("message", onMessage);
+    
+    (async () => {
+      // Immediate cookie-based fallback for username/email
+      try {
+        const parts = document.cookie.split("; ").filter(Boolean);
+        for (const part of parts) {
+          const idx = part.indexOf("=");
+          if (idx === -1) continue;
+          const key = part.substring(0, idx);
+          const val = part.substring(idx + 1);
+          if (key.startsWith("CognitoIdentityServiceProvider.") && key.endsWith(".LastAuthUser")) {
+            const raw = decodeURIComponent(val);
+            if (raw && !isCancelled) {
+              setUserEmail(raw);
+              return; // found username from cookie; stop here
+            }
+          }
+        }
+      } catch {}
+
+      try {
+        // Prefer Cognito username (often the email) if available
+        const { username } = await getCurrentUser();
+        if (username && !isCancelled) {
+          setUserEmail(username || undefined);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      // Try fetching user attributes (email) when available
+      try {
+        const attrs = await fetchUserAttributes();
+        const emailAttr = attrs?.email as string | undefined;
+        if (emailAttr && !isCancelled) {
+          setUserEmail(emailAttr);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      try {
+        const session = await fetchAuthSession();
+        const emailClaim = (session as any)?.tokens?.idToken?.payload?.email as string | undefined;
+        if (!isCancelled) setUserEmail(emailClaim ?? undefined);
+      } catch {
+        if (!isCancelled) setUserEmail(undefined);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+      window.removeEventListener("message", onMessage);
+    };
+  }, []);
 
   const apiDebugOptions = useMemo(() => [
     { label: "none", value: undefined },
@@ -59,9 +140,26 @@ export const App: React.FC = () => {
   return (
     <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
       <TopMenu
-        authLabel="login / sign-up"
+        authLabel={userEmail || "login / sign-up"}
         authHref={import.meta.env.VITE_AUTH_URL || "/auth"}
+        isAuthenticated={Boolean(userEmail)}
+        logoutHref={(() => {
+          const domain = (import.meta.env.VITE_COGNITO_DOMAIN_URL as string | undefined)?.replace(/^https?:\/\//, "");
+          if (!domain) return undefined;
+          const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined;
+          const logoutRedirect = (import.meta.env.VITE_LOGOUT_REDIRECT_URL as string | undefined) || window.location.origin;
+          if (!clientId) return undefined;
+          return `https://${domain}/logout?client_id=${encodeURIComponent(clientId)}&logout_uri=${encodeURIComponent(logoutRedirect)}`;
+        })()}
       />
+      {/* Invisible iframe to pull session from auth origin when on different ports */}
+      {!bridgeReady && (
+        <iframe
+          src={(import.meta.env.VITE_AUTH_URL || "/auth").replace(/\/$/, "") + "/session-bridge"}
+          style={{ display: "none" }}
+          title="session-bridge"
+        />
+      )}
       <div style={{ padding: 24 }}>
       <Row gutter={[16, 16]}>
         <Col span={24}>
