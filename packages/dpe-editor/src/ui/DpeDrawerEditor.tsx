@@ -183,6 +183,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       open={open}
       onClose={onClose}
       width={width}
+      mask={false}
       extra={
         <Space>
           <Button onClick={onClose}>Close</Button>
@@ -289,11 +290,18 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               ) : null}
               <div style={{ height: 8 }} />
               <Input.TextArea
-                disabled={!st.enabled}
+                readOnly={!st.enabled}
                 autoSize={{ minRows: 6 }}
                 value={st.text}
                 onChange={(e) => setEditorState((prev) => ({ ...prev, [k]: { ...prev[k], text: e.target.value } }))}
-                style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace" }}
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+                  backgroundColor: st.enabled ? undefined : "#f5f5f5",
+                  color: st.enabled ? undefined : "#6b7280",
+                  cursor: st.enabled ? "text" : "default",
+                  maxHeight: st.enabled ? undefined : 280,
+                  overflow: st.enabled ? undefined : "auto",
+                }}
               />
             </Card>
           );

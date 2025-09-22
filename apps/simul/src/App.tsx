@@ -103,7 +103,8 @@ export const App: React.FC = () => {
           const raw = decodeURIComponent(cookie.substring(eq + 1));
           const parts = raw.split(".");
           if (parts.length >= 2) {
-            const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+            const mid = parts[1]!;
+            const payload = JSON.parse(atob(mid.replace(/-/g, "+").replace(/_/g, "/")));
             const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
             if (emailClaim && !isCancelled) {
               setUserEmail(emailClaim);
@@ -516,8 +517,8 @@ export const App: React.FC = () => {
                 style={{
                   minHeight: 420,
                   width: "100%",
-                  background: "#ffffff",
-                  color: "#111827",
+                  background: isEditorOpen ? "#f3f4f6" : "#ffffff",
+                  color: isEditorOpen ? "#6b7280" : "#111827",
                   border: "1px solid #e5e7eb",
                   borderRadius: 8,
                   padding: 12,
@@ -525,7 +526,10 @@ export const App: React.FC = () => {
                   fontSize: 14,
                   lineHeight: 1.45,
                   resize: "vertical",
+                  cursor: isEditorOpen ? "default" : "text",
+                  overflow: "auto",
                 }}
+                readOnly={isEditorOpen}
               />
             </div>
             <div style={{ marginTop: 12 }}>
@@ -683,11 +687,31 @@ export const App: React.FC = () => {
                     if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
                     const prevSelStart = ta.selectionStart;
                     const prevSelEnd = ta.selectionEnd;
-                    ta.focus();
-                    ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    const prevScrollTop = ta.scrollTop;
+                    const prevScrollLeft = ta.scrollLeft;
+                    try {
+                      // Avoid scrolling when focusing for selection highlight
+                      (ta as any).focus({ preventScroll: true });
+                    } catch {
+                      try { ta.focus(); } catch {}
+                    }
+                    try {
+                      ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    } catch {}
+                    // Immediately restore scroll so the viewport doesn't jump
+                    try {
+                      ta.scrollTop = prevScrollTop;
+                      ta.scrollLeft = prevScrollLeft;
+                    } catch {}
                     window.setTimeout(() => {
-                      try { ta.setSelectionRange(prevSelStart, prevSelEnd); } catch {}
-                    }, 1000);
+                      try {
+                        // Restore previous selection and scroll position without jumping
+                        (ta as any).focus({ preventScroll: true });
+                        ta.setSelectionRange(prevSelStart, prevSelEnd);
+                        ta.scrollTop = prevScrollTop;
+                        ta.scrollLeft = prevScrollLeft;
+                      } catch {}
+                    }, 600);
                   } catch {}
                 }}
               />
