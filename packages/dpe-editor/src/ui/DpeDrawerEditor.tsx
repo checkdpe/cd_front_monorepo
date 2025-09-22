@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
-import { Button, Card, Drawer, Input, InputNumber, Space, Switch, message } from "antd";
+import React, { useEffect, useMemo, useState } from "react";
+import { Button, Card, Checkbox, Drawer, Input, InputNumber, Space, Switch, message } from "antd";
+import { fetchSimulationDpeFullJson } from "../api";
 
 export type DpeDrawerEditorProps = {
   open: boolean;
@@ -7,6 +8,11 @@ export type DpeDrawerEditorProps = {
   width?: number | string;
   rootJsonText: string;
   onApply: (nextJsonText: string) => void;
+  // When provided, component will call the API on open using a Cognito bearer token
+  apiLoadParams?: { baseUrl?: string; ref_ademe: string };
+  getAccessToken?: () => Promise<string | null>;
+  onLoadedFromApi?: (data: unknown) => void;
+  onHighlightJsonPath?: (args: { collection: "plancher_haut_collection" | "plancher_bas_collection"; itemKey: "plancher_haut" | "plancher_bas"; indices: number[] }) => void;
 };
 
 type VariantKey = "haut" | "bas";
@@ -32,7 +38,85 @@ function ensurePath(root: any, path: string[]): any {
   return cursor;
 }
 
-export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "30%", rootJsonText, onApply }) => {
+export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "30%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath }) => {
+  const [availableOptions, setAvailableOptions] = useState<Record<VariantKey, { key: string; description: string; selected: boolean; payload: any }[]>>({ haut: [], bas: [] });
+  const [highlighted, setHighlighted] = useState<Record<VariantKey, Record<string, boolean>>>({ haut: {}, bas: {} });
+  // Fetch from API when the drawer opens if configured
+  useEffect(() => {
+    if (!open || !apiLoadParams || !getAccessToken) return;
+    let isCancelled = false;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const data: any = await fetchSimulationDpeFullJson({
+          baseUrl: apiLoadParams.baseUrl,
+          ref_ademe: apiLoadParams.ref_ademe,
+          accessToken: token,
+        });
+        if (!isCancelled) {
+          onLoadedFromApi?.(data);
+          try {
+            // Derive current scopes from JSON if present to preselect options
+            let parsed: any = [];
+            try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+            const runs: any[] = Array.isArray(parsed) ? parsed : [];
+            const hautEntry = runs.find((r) => r && r.elements_variant === "dpe.logement.enveloppe.plancher_haut_collection.plancher_haut");
+            const basEntry = runs.find((r) => r && r.elements_variant === "dpe.logement.enveloppe.plancher_bas_collection.plancher_bas");
+            const hautScopes: number[] = Array.isArray(hautEntry?.elements_scope) ? (hautEntry.elements_scope as number[]) : [];
+            const basScopes: number[] = Array.isArray(basEntry?.elements_scope) ? (basEntry.elements_scope as number[]) : [];
+            const hautArr = Array.isArray(((data?.dpe?.logement?.enveloppe?.plancher_haut_collection || {}) as any).plancher_haut)
+              ? ((data?.dpe?.logement?.enveloppe?.plancher_haut_collection as any).plancher_haut as any[])
+              : [];
+            const basArr = Array.isArray(((data?.dpe?.logement?.enveloppe?.plancher_bas_collection || {}) as any).plancher_bas)
+              ? ((data?.dpe?.logement?.enveloppe?.plancher_bas_collection as any).plancher_bas as any[])
+              : [];
+            const nextHaut = hautArr.map((item: any, idx: number) => ({
+              key: String(item?.donnee_entree?.reference || idx),
+              description: String(item?.donnee_entree?.description || `Plancher haut ${idx + 1}`),
+              selected: hautScopes.includes(idx),
+              payload: item,
+            }));
+            const nextBas = basArr.map((item: any, idx: number) => ({
+              key: String(item?.donnee_entree?.reference || idx),
+              description: String(item?.donnee_entree?.description || `Plancher bas ${idx + 1}`),
+              selected: basScopes.includes(idx),
+              payload: item,
+            }));
+            setAvailableOptions({ haut: nextHaut, bas: nextBas });
+          } catch {
+            setAvailableOptions({ haut: [], bas: [] });
+          }
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          // eslint-disable-next-line no-console
+          console.error("DpeDrawerEditor: failed to load from API", err);
+          message.error("Failed to load initial data");
+        }
+      }
+    })();
+    return () => { isCancelled = true; };
+  }, [open, apiLoadParams?.baseUrl, apiLoadParams?.ref_ademe, getAccessToken, onLoadedFromApi]);
+
+  // Keep checkbox selections in sync with current JSON (runs array) in the editor
+  useEffect(() => {
+    try {
+      const parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : [];
+      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+      const hautEntry = runs.find((r) => r && r.elements_variant === "dpe.logement.enveloppe.plancher_haut_collection.plancher_haut");
+      const basEntry = runs.find((r) => r && r.elements_variant === "dpe.logement.enveloppe.plancher_bas_collection.plancher_bas");
+      const hautScopes: number[] = Array.isArray(hautEntry?.elements_scope) ? hautEntry.elements_scope as number[] : [];
+      const basScopes: number[] = Array.isArray(basEntry?.elements_scope) ? basEntry.elements_scope as number[] : [];
+      setAvailableOptions((prev) => ({
+        haut: prev.haut.map((o, idx) => ({ ...o, selected: hautScopes.includes(idx) })),
+        bas: prev.bas.map((o, idx) => ({ ...o, selected: basScopes.includes(idx) })),
+      }));
+    } catch {
+      // ignore
+    }
+  }, [rootJsonText]);
+
   const initialState = useMemo((): Record<VariantKey, EditorVariantState> => {
     try {
       const root = rootJsonText.trim() ? JSON.parse(rootJsonText) : {};
@@ -56,6 +140,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   }, [rootJsonText]);
 
   const [editorState, setEditorState] = useState<Record<VariantKey, EditorVariantState>>(initialState);
+
+  // (no-op)
 
   function applyEditorChanges() {
     try {
@@ -129,6 +215,78 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                 <div style={{ color: "#4b5563" }}>index</div>
                 <InputNumber min={0} value={st.index} onChange={(val) => setEditorState((prev) => ({ ...prev, [k]: { ...prev[k], index: Number(val ?? 0) } }))} />
               </Space>
+              <div style={{ height: 8 }} />
+              {availableOptions[k]?.length ? (
+                <div>
+                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Options from API</div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {availableOptions[k].map((opt, idx) => (
+                      <label
+                        key={opt.key}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "4px 6px",
+                          borderRadius: 6,
+                          background: highlighted[k]?.[opt.key] ? "#fff7ed" : "transparent",
+                          transition: "background-color 600ms ease",
+                        }}
+                      >
+                        <Checkbox
+                          checked={opt.selected}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            // Update JSON immediately (runs array with elements_scope) and highlight
+                            try {
+                              let parsed: any = [];
+                              try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                              const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                              const collectionName = v.collection as "plancher_haut_collection" | "plancher_bas_collection";
+                              const itemKey = v.itemKey as "plancher_haut" | "plancher_bas";
+                              const variantPath = `dpe.logement.enveloppe.${collectionName}.${itemKey}`;
+                              let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                              if (!entry) {
+                                entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                                runs.push(entry);
+                              }
+                              const optionIdx = idx; // 0-based index in available options order
+                              const scopes: number[] = Array.isArray(entry.elements_scope) ? [...entry.elements_scope] : [];
+                              const has = scopes.includes(optionIdx);
+                              if (checked && !has) scopes.push(optionIdx);
+                              if (!checked && has) {
+                                const pos = scopes.indexOf(optionIdx);
+                                if (pos !== -1) scopes.splice(pos, 1);
+                              }
+                              entry.elements_scope = scopes;
+
+                              onApply(JSON.stringify(runs, null, 2));
+                              message.success(checked ? "Added option to JSON" : "Removed option from JSON");
+
+                              // Ask parent to highlight the corresponding indices in scope
+                              try {
+                                const indices = scopes.slice().sort((a, b) => a - b);
+                                if (indices.length > 0) onHighlightJsonPath?.({ collection: collectionName, itemKey, indices });
+                              } catch {}
+
+                              const refKey = String(opt.key);
+                              setHighlighted((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), [refKey]: true } }));
+                              window.setTimeout(() => {
+                                setHighlighted((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), [refKey]: false } }));
+                              }, 1000);
+                            } catch (err) {
+                              // eslint-disable-next-line no-console
+                              console.error("Failed to update JSON from option toggle", err);
+                              message.error("Failed to update JSON");
+                            }
+                          }}
+                        />
+                        <span style={{ fontSize: 12, color: "#374151" }}>{opt.description}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div style={{ height: 8 }} />
               <Input.TextArea
                 disabled={!st.enabled}

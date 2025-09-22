@@ -8,11 +8,13 @@ import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { DpeDrawerEditor } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
+import { flushSync } from "react-dom";
 
 const { Title, Paragraph } = Typography;
 
 export const App: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
   const [skip, setSkip] = useState<number>(0);
   const [limit, setLimit] = useState<number>(0);
@@ -507,6 +509,7 @@ export const App: React.FC = () => {
           <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
             <div style={{ display: "grid" }}>
               <textarea
+                ref={textAreaRef}
                 value={jsonText}
                 onChange={(e) => { hasUserEditedRef.current = true; setJsonText(e.target.value); }}
                 placeholder="Paste or write JSON here"
@@ -629,7 +632,64 @@ export const App: React.FC = () => {
                 onClose={() => setIsEditorOpen(false)}
                 width="40%"
                 rootJsonText={jsonText}
-                onApply={(next) => setJsonText(next)}
+                onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+                apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+                getAccessToken={getAccessToken}
+                onLoadedFromApi={(data) => {
+                  try {
+                    const text = JSON.stringify(data, null, 2);
+                    setJsonText((prev) => (prev?.trim() ? prev : text));
+                  } catch {}
+                }}
+                onHighlightJsonPath={({ collection, itemKey, indices }) => {
+                  try {
+                    const ta = textAreaRef.current;
+                    if (!ta) return;
+                    const text = ta.value;
+                    // New highlight strategy: target the runs entry with elements_variant, then the elements_scope array
+                    const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                    const variantKeyIdx = text.indexOf('"elements_variant"');
+                    let searchFrom = 0;
+                    let entryStart = -1;
+                    let scopeArrayStart = -1;
+                    let scopeArrayEnd = -1;
+                    // Scan for the entry containing the variantPath
+                    while (true) {
+                      const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                      if (varIdx === -1) break;
+                      const quoteIdx = text.indexOf('"', varIdx + 18);
+                      const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                      const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                      if (value === variantPath) {
+                        // Backtrack to entry start '{'
+                        let i = varIdx;
+                        while (i >= 0 && text[i] !== '{') i--;
+                        entryStart = i >= 0 ? i : varIdx;
+                        // Find elements_scope within this entry
+                        const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                        if (scopeKeyIdx !== -1) {
+                          const openBracket = text.indexOf('[', scopeKeyIdx);
+                          if (openBracket !== -1) {
+                            scopeArrayStart = openBracket;
+                            // find matching closing bracket (not perfect but ok for flat arrays)
+                            const closeBracket = text.indexOf(']', openBracket);
+                            if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                          }
+                        }
+                        break;
+                      }
+                      searchFrom = varIdx + 1;
+                    }
+                    if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                    const prevSelStart = ta.selectionStart;
+                    const prevSelEnd = ta.selectionEnd;
+                    ta.focus();
+                    ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    window.setTimeout(() => {
+                      try { ta.setSelectionRange(prevSelStart, prevSelEnd); } catch {}
+                    }, 1000);
+                  } catch {}
+                }}
               />
             </div>
             <SimulationScenariosModal
