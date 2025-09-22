@@ -411,6 +411,16 @@ export const App: React.FC = () => {
               if (isConfiguredLocal && !isPageLocal) {
                 // ignore local auth URL on non-localhost pages
               } else {
+                // On non-local hosts, prefer explicit index.html so returnTo is added to the file URL
+                if (!isConfiguredLocal) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  if (!endsWithHtml) {
+                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
+                    return base + "/index.html";
+                  }
+                }
                 return configured;
               }
             } catch {
@@ -418,7 +428,7 @@ export const App: React.FC = () => {
             }
           }
           if (window.location.hostname === "localhost") return "http://localhost:5173";
-          return "/auth";
+          return "/auth/index.html";
         })()}
         isAuthenticated={Boolean(userEmail)}
         centeredTitle={refAdeme}
