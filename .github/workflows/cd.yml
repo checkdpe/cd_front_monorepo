@@ -74,8 +74,20 @@ jobs:
         echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
         echo "AWS_ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
     
-    - name: Init env
-      run: cp .env.$LD_ENV .env
+    - name: Init app env files
+      run: |
+        set -e
+        apps=("simul" "auth")
+        for app in "${apps[@]}"; do
+          src="apps/$app/.$LD_ENV.env"
+          dst="apps/$app/.env"
+          if [ -f "$src" ]; then
+            cp "$src" "$dst"
+            echo "Copied $src -> $dst"
+          else
+            echo "Missing $src; skipping" >&2
+          fi
+        done
 
 
     - name: Install dependencies
