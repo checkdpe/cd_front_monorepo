@@ -648,7 +648,12 @@ export const App: React.FC = () => {
                     <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
                     <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={async () => {
                       if (isSaving) return;
-                      const name = window.prompt("Save as name:", simulLog || "custom");
+                      const cdEnv = ((import.meta as any)?.env?.VITE_CD_ENV as string | undefined) || (import.meta.env.MODE === "development" ? "dev" : "prod");
+                      const suggested = `${cdEnv}_simul_${simulLog || "test0001"}`;
+                      const name = window.prompt(
+                        "Save as name (format: <CD_ENV>_simul_<name>, e.g., dev_simul_test0001):",
+                        suggested
+                      );
                       if (!name) { setIsSaveMenuOpen(false); return; }
                       try {
                         const ref = `${refAdeme || "unknown"}-${name}`;
@@ -671,6 +676,19 @@ export const App: React.FC = () => {
                           throw new Error(`HTTP ${res.status} ${txt}`);
                         }
                         message.success(`saved ${name}`);
+                        if (refAdeme) {
+                          const { origin, pathname } = window.location;
+                          const basePath = (() => {
+                            try {
+                              const idx = pathname.lastIndexOf("/");
+                              return idx !== -1 ? pathname.slice(0, idx + 1) : "/";
+                            } catch {
+                              return "/";
+                            }
+                          })();
+                          const targetUrl = `${origin}${basePath}index.html?ref_ademe=${encodeURIComponent(refAdeme)}&simul=${encodeURIComponent(name)}`;
+                          window.location.href = targetUrl;
+                        }
                       } catch {
                         message.error("save failed");
                       } finally {
