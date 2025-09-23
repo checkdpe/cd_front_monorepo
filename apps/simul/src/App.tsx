@@ -5,6 +5,7 @@ import { Hub } from "aws-amplify/utils";
 import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
+import { LoadScenarioModal } from "@acme/load-scenario";
 import { DpeDrawerEditor } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
   const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
   function openEditor() { setIsEditorOpen(true); }
 
@@ -581,7 +583,7 @@ export const App: React.FC = () => {
                   <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
                   {isSaveMenuOpen && (
                     <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
-                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsScenariosOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsLoadSavedOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
                     <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
                     <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={() => { if (!isSaving) handleSaveToBackoffice(); }}>save {simulLog || "default"}</div>
                     <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
@@ -728,6 +730,33 @@ export const App: React.FC = () => {
                 }
                 setIsScenariosOpen(false);
               }}
+            />
+            <LoadScenarioModal
+              open={isLoadSavedOpen}
+              onCancel={() => setIsLoadSavedOpen(false)}
+              onSelect={(payload: unknown) => {
+                try {
+                  // Accept payload either as normalized object { ref_ademe, label } or string "ref:label"
+                  let ref: string | undefined;
+                  let simul: string | undefined;
+                  if (typeof payload === "string") {
+                    const colon = payload.indexOf(":");
+                    ref = colon !== -1 ? payload.slice(0, colon) : undefined;
+                    simul = colon !== -1 ? payload.slice(colon + 1) : undefined;
+                  } else if (payload && typeof payload === "object") {
+                    ref = (payload as any).ref_ademe as string | undefined;
+                    simul = (payload as any).label as string | undefined;
+                  }
+                  const url = new URL(window.location.href);
+                  if (ref) url.searchParams.set("ref_ademe", ref);
+                  if (simul) url.searchParams.set("simul", simul);
+                  window.location.href = url.toString();
+                } catch {}
+                setIsLoadSavedOpen(false);
+              }}
+              baseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+              initialRefAdeme={refAdeme}
+              getAccessToken={getAccessToken}
             />
           </Card>
         </Col>

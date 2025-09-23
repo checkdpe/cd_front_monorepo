@@ -17,7 +17,8 @@
     "@ant-design/icons": "^6.0.2",
     "@acme/top-menu": "workspace:*",
     "@acme/simulation-scenarios": "workspace:*",
-    "@acme/dpe-editor": "workspace:*"
+    "@acme/dpe-editor": "workspace:*",
+    "@acme/load-scenario": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
