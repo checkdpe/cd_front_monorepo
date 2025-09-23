@@ -1,3 +1,25 @@
+# Check JSON modification before closing drawer
+_Exported on 23/09/2025 at 7:25:43 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+when willing to close the drawer, compare if json is going to be modfied upon closing, if not : close without warning
+
+---
+
+**Cursor**
+
+I'll scan the editor component to locate the drawer close handler and any unsaved-change confirmation logic so I can adjust it to close silently when no JSON changes would occur.
+
+I'll locate the state that represents the current edited JSON and the original reference to compare them for unsaved changes, so I can bypass the confirmation when there's no difference.
+
+I'll update the drawer close handler to first compare the current JSON to the original captured JSON and close immediately if they're identical; otherwise, it will show the existing confirmation dialog. I'll make the minimal safe edit in `packages/dpe-editor/src/ui/DpeDrawerEditor.tsx` and then check for linter issues.
+
+I'll add a comparison in the drawer close handler to detect if the current JSON equals the original captured on open; if unchanged, it closes silently, otherwise it shows the discard confirmation. Then I'll run a quick linter check on the modified file.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
 import { fetchSimulationDpeFullJson, fetchSimulationTemplateJson } from "../api";
@@ -1128,4 +1150,84 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   );
 };
 
+
+
+```
+
+- I added a guard in the drawer’s close handler to compare the current JSON (`rootJsonText`) with the original captured on open (`originalJsonRef`): if they’re equal, it closes immediately; if different, it shows the existing discard confirmation.
+
+- Key edit in `packages/dpe-editor/src/ui/DpeDrawerEditor.tsx`:
+```463:477:/Volumes/privateGg/ai-microfront-ant/packages/dpe-editor/src/ui/DpeDrawerEditor.tsx
+function handleDrawerClose() {
+  // Close silently if nothing would change; otherwise, confirm discard.
+  try {
+    const originalText = (originalJsonRef.current || "").trim();
+    const currentText = (rootJsonText || "").trim();
+    let isSame = false;
+    try {
+      const originalParsed = originalText ? JSON.parse(originalText) : null;
+      const currentParsed = currentText ? JSON.parse(currentText) : null;
+      isSame = JSON.stringify(originalParsed) === JSON.stringify(currentParsed);
+    } catch {
+      isSame = originalText === currentText;
+    }
+    if (isSame) {
+      onClose();
+      return;
+    }
+  } catch {}
+  Modal.confirm({
+    title: "Discard changes?",
+    content: "Closing will revert any changes made in this panel.",
+    okText: "Discard",
+    cancelText: "Cancel",
+    onOk: () => {
+      try {
+        onApply(originalJsonRef.current);
+      } finally {
+        onClose();
+      }
+    },
+  });
+}
+```
+
+- Lint check passed with no errors.
+
+- Impact: Users won’t see a warning when closing the drawer if the JSON hasn’t been modified.
+
+```typescriptreact
+function handleDrawerClose() {
+  // Close silently if nothing would change; otherwise, confirm discard.
+  try {
+    const originalText = (originalJsonRef.current || "").trim();
+    const currentText = (rootJsonText || "").trim();
+    let isSame = false;
+    try {
+      const originalParsed = originalText ? JSON.parse(originalText) : null;
+      const currentParsed = currentText ? JSON.parse(currentText) : null;
+      isSame = JSON.stringify(originalParsed) === JSON.stringify(currentParsed);
+    } catch {
+      isSame = originalText === currentText;
+    }
+    if (isSame) {
+      onClose();
+      return;
+    }
+  } catch {}
+  Modal.confirm({
+    title: "Discard changes?",
+    content: "Closing will revert any changes made in this panel.",
+    okText: "Discard",
+    cancelText: "Cancel",
+    onOk: () => {
+      try {
+        onApply(originalJsonRef.current);
+      } finally {
+        onClose();
+      }
+    },
+  });
+}
+```
 
