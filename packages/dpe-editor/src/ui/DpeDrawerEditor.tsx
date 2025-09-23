@@ -75,6 +75,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const [templateRuns, setTemplateRuns] = useState<any[]>([]);
   const [templateDerived, setTemplateDerived] = useState<Record<VariantId, { increments: number[]; priceVar: number[] }>>({});
   const [templateScenarioIds, setTemplateScenarioIds] = useState<Record<VariantId, number[]>>({});
+  const [detailsModal, setDetailsModal] = useState<{ open: boolean; title: string; data: any }>({ open: false, title: "", data: null });
 
   const variantDefs: VariantDef[] = useMemo(() => {
     const map = new Map<VariantId, VariantDef>();
@@ -789,24 +790,35 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               {/* index selector removed */}
               {(availableOptions[v.id] && Array.isArray(availableOptions[v.id]) && (availableOptions[v.id] as any[]).length > 0) ? (
                 <div>
-                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Scope</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontWeight: 500 }}>Scope</div>
+                    <div style={{ color: "#9ca3af", fontSize: 12 }}>
+                      "right click" for details
+                    </div>
+                  </div>
                   <div style={{ display: "grid", gap: 6 }}>
-                    {(availableOptions[v.id] || []).map((opt, idx) => (
-                      <label
-                        key={opt.key}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          padding: "4px 6px",
-                          borderRadius: 6,
-                          background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
-                          transition: "background-color 600ms ease",
-                        }}
-                      >
-                        <Checkbox
-                          checked={opt.selected}
-                          onChange={(e) => {
+                    {(availableOptions[v.id] || []).map((opt, idx) => {
+                      const detailsData = { variant: v.id, collection: v.collection, itemKey: v.itemKey, index: idx, key: opt.key, selected: opt.selected, payload: opt.payload };
+                      return (
+                        <label
+                          key={opt.key}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setDetailsModal({ open: true, title: `${v.label} · ${opt.description}`, data: detailsData });
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "4px 6px",
+                            borderRadius: 6,
+                            background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
+                            transition: "background-color 600ms ease",
+                          }}
+                        >
+                          <Checkbox
+                            checked={opt.selected}
+                            onChange={(e) => {
                             const checked = e.target.checked;
                             // Update JSON immediately (runs array with elements_scope) and highlight
                             try {
@@ -851,11 +863,12 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               console.error("Failed to update JSON from option toggle", err);
                               message.error("Failed to update JSON");
                             }
-                          }}
-                        />
-                        <span style={{ fontSize: 12, color: "#374151" }}>{opt.description}</span>
-                      </label>
-                    ))}
+                            }}
+                          />
+                          <span style={{ fontSize: 12, color: "#374151" }}>{opt.description}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
@@ -1123,6 +1136,21 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
             </div>
           ) : null}
         </Space>
+      </Modal>
+      <Modal
+        title={detailsModal.title || "Details"}
+        open={detailsModal.open}
+        onCancel={() => setDetailsModal({ open: false, title: "", data: null })}
+        footer={[
+          <Button key="close" onClick={() => setDetailsModal({ open: false, title: "", data: null })}>Close</Button>,
+        ]}
+        width={720}
+      >
+        <div style={{ maxHeight: 480, overflow: "auto" }}>
+          <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
+{detailsModal.data ? JSON.stringify(detailsModal.data, null, 2) : ""}
+          </pre>
+        </div>
       </Modal>
     </Drawer>
   );
