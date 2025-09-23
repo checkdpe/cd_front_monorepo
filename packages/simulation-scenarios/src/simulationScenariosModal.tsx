@@ -95,7 +95,7 @@ export const SimulationScenariosModal: React.FC<SimulationScenariosModalProps> =
       okText="Load"
       okButtonProps={{ disabled: !isValid }}
       onOk={handleOk}
-      destroyOnClose
+      destroyOnHidden
     >
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
         <div>

@@ -1,3 +1,27 @@
+# Drawer not closing on OK click
+_Exported on 23/09/2025 at 1:11:53 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+for some reasons, clicking on "OK" would not apply/close drawer
+
+---
+
+**Cursor**
+
+I'll first locate the OK button handler in `DpeDrawerEditor` to see why it doesn't close/apply, then implement the fix and check for lints.
+
+I'll search in the editor file for the OK button and its click handler, plus any drawer close/apply logic, to pinpoint why it doesn't close.
+
+I'll inspect the `applyEditorChanges` and render code in `DpeDrawerEditor.tsx`, and also find where `DpeDrawerEditor` is used to ensure `open`/`onClose` are wired correctly.
+
+I'm going to fix the OK handler bug that returns early and prevents `onApply`/`onClose` from running, then run lints on the edited file.
+
+I'll change the early return in the OK handler loop to a continue so the drawer applies and closes properly, then run the linter on the file.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
 import { fetchSimulationDpeFullJson, fetchSimulationTemplateJson } from "../api";
@@ -461,23 +485,6 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   }
 
   function handleDrawerClose() {
-    // Close silently if nothing would change; otherwise, confirm discard.
-    try {
-      const originalText = (originalJsonRef.current || "").trim();
-      const currentText = (rootJsonText || "").trim();
-      let isSame = false;
-      try {
-        const originalParsed = originalText ? JSON.parse(originalText) : null;
-        const currentParsed = currentText ? JSON.parse(currentText) : null;
-        isSame = JSON.stringify(originalParsed) === JSON.stringify(currentParsed);
-      } catch {
-        isSame = originalText === currentText;
-      }
-      if (isSame) {
-        onClose();
-        return;
-      }
-    } catch {}
     Modal.confirm({
       title: "Discard changes?",
       content: "Closing will revert any changes made in this panel.",
@@ -1128,4 +1135,32 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   );
 };
 
+
+
+```
+
+I found the issue: the OK handler returned early inside the loop, so it never reached onApply/onClose.
+
+What I changed
+- In `packages/dpe-editor/src/ui/DpeDrawerEditor.tsx`, replaced the early return with a continue so the flow reaches the apply/close section.
+
+Code reference
+```364:367:/Volumes/privateGg/ai-microfront-ant/packages/dpe-editor/src/ui/DpeDrawerEditor.tsx
+          if (!entry) continue;
+          // Keep scope strategy as staged
+          entry.scope_strategy = scopeStrategy[v.id] || entry.scope_strategy || "all";
+          // Remove any UI-only pricing blocks
+```
+
+Status
+- Applied the fix and ran lints; no issues found.
+
+Try again and the drawer should apply and close when clicking OK.
+
+```typescriptreact
+          if (!entry) continue;
+          // Keep scope strategy as staged
+          entry.scope_strategy = scopeStrategy[v.id] || entry.scope_strategy || "all";
+          // Remove any UI-only pricing blocks
+```
 

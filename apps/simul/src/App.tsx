@@ -8,11 +8,13 @@ import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { DpeDrawerEditor } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
+import { flushSync } from "react-dom";
 
 const { Title, Paragraph } = Typography;
 
 export const App: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
   const [skip, setSkip] = useState<number>(0);
   const [limit, setLimit] = useState<number>(0);
@@ -101,7 +103,8 @@ export const App: React.FC = () => {
           const raw = decodeURIComponent(cookie.substring(eq + 1));
           const parts = raw.split(".");
           if (parts.length >= 2) {
-            const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+            const mid = parts[1]!;
+            const payload = JSON.parse(atob(mid.replace(/-/g, "+").replace(/_/g, "/")));
             const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
             if (emailClaim && !isCancelled) {
               setUserEmail(emailClaim);
@@ -507,14 +510,15 @@ export const App: React.FC = () => {
           <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
             <div style={{ display: "grid" }}>
               <textarea
+                ref={textAreaRef}
                 value={jsonText}
                 onChange={(e) => { hasUserEditedRef.current = true; setJsonText(e.target.value); }}
                 placeholder="Paste or write JSON here"
                 style={{
                   minHeight: 420,
                   width: "100%",
-                  background: "#ffffff",
-                  color: "#111827",
+                  background: isEditorOpen ? "#f3f4f6" : "#ffffff",
+                  color: isEditorOpen ? "#6b7280" : "#111827",
                   border: "1px solid #e5e7eb",
                   borderRadius: 8,
                   padding: 12,
@@ -522,12 +526,15 @@ export const App: React.FC = () => {
                   fontSize: 14,
                   lineHeight: 1.45,
                   resize: "vertical",
+                  cursor: isEditorOpen ? "default" : "text",
+                  overflow: "auto",
                 }}
+                readOnly={isEditorOpen}
               />
             </div>
             <div style={{ marginTop: 12 }}>
               <Collapse
-                destroyInactivePanel
+                destroyOnHidden
                 items={[
                   {
                     key: "options",
@@ -627,9 +634,86 @@ export const App: React.FC = () => {
               <DpeDrawerEditor
                 open={isEditorOpen}
                 onClose={() => setIsEditorOpen(false)}
-                width="40%"
+                width="50%"
                 rootJsonText={jsonText}
-                onApply={(next) => setJsonText(next)}
+                onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+                apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+                getAccessToken={getAccessToken}
+                onLoadedFromApi={(data) => {
+                  try {
+                    const text = JSON.stringify(data, null, 2);
+                    setJsonText((prev) => (prev?.trim() ? prev : text));
+                  } catch {}
+                }}
+                onHighlightJsonPath={({ collection, itemKey, indices }) => {
+                  try {
+                    const ta = textAreaRef.current;
+                    if (!ta) return;
+                    const text = ta.value;
+                    // New highlight strategy: target the runs entry with elements_variant, then the elements_scope array
+                    const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                    const variantKeyIdx = text.indexOf('"elements_variant"');
+                    let searchFrom = 0;
+                    let entryStart = -1;
+                    let scopeArrayStart = -1;
+                    let scopeArrayEnd = -1;
+                    // Scan for the entry containing the variantPath
+                    while (true) {
+                      const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                      if (varIdx === -1) break;
+                      const quoteIdx = text.indexOf('"', varIdx + 18);
+                      const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                      const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                      if (value === variantPath) {
+                        // Backtrack to entry start '{'
+                        let i = varIdx;
+                        while (i >= 0 && text[i] !== '{') i--;
+                        entryStart = i >= 0 ? i : varIdx;
+                        // Find elements_scope within this entry
+                        const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                        if (scopeKeyIdx !== -1) {
+                          const openBracket = text.indexOf('[', scopeKeyIdx);
+                          if (openBracket !== -1) {
+                            scopeArrayStart = openBracket;
+                            // find matching closing bracket (not perfect but ok for flat arrays)
+                            const closeBracket = text.indexOf(']', openBracket);
+                            if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                          }
+                        }
+                        break;
+                      }
+                      searchFrom = varIdx + 1;
+                    }
+                    if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                    const prevSelStart = ta.selectionStart;
+                    const prevSelEnd = ta.selectionEnd;
+                    const prevScrollTop = ta.scrollTop;
+                    const prevScrollLeft = ta.scrollLeft;
+                    try {
+                      // Avoid scrolling when focusing for selection highlight
+                      (ta as any).focus({ preventScroll: true });
+                    } catch {
+                      try { ta.focus(); } catch {}
+                    }
+                    try {
+                      ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    } catch {}
+                    // Immediately restore scroll so the viewport doesn't jump
+                    try {
+                      ta.scrollTop = prevScrollTop;
+                      ta.scrollLeft = prevScrollLeft;
+                    } catch {}
+                    window.setTimeout(() => {
+                      try {
+                        // Restore previous selection and scroll position without jumping
+                        (ta as any).focus({ preventScroll: true });
+                        ta.setSelectionRange(prevSelStart, prevSelEnd);
+                        ta.scrollTop = prevScrollTop;
+                        ta.scrollLeft = prevScrollLeft;
+                      } catch {}
+                    }, 600);
+                  } catch {}
+                }}
               />
             </div>
             <SimulationScenariosModal
