@@ -6,7 +6,7 @@ import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typogr
 import { ExportOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { LoadScenarioModal } from "@acme/load-scenario";
-import { DpeDrawerEditor } from "@acme/dpe-editor";
+import { DpeDrawerEditor, fetchSimulationTemplateJson } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 import { flushSync } from "react-dom";
@@ -38,6 +38,7 @@ export const App: React.FC = () => {
   const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
   function openEditor() { setIsEditorOpen(true); }
+  const hasLoadedTemplateRef = useRef<boolean>(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -159,6 +160,7 @@ export const App: React.FC = () => {
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
     const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (simul === "default") return;
     if (!refAdeme) return;
 
     const controller = new AbortController();
@@ -199,12 +201,69 @@ export const App: React.FC = () => {
     return () => controller.abort();
   }, [bridgeAuthenticated]);
 
+  // On init: if URL contains simul=default, call template endpoint and initialize editor JSON
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        if (cancelled) return;
+        if (hasLoadedTemplateRef.current) return;
+        const url = new URL(window.location.href);
+        const simul = url.searchParams.get("simul");
+        if (simul !== "default") return;
+        if (!refAdeme) return;
+        if (hasUserEditedRef.current) return;
+
+        const accessToken = await waitForAccessToken(15000, 250);
+        if (!accessToken) return;
+
+        const baseUrl = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const template = await fetchSimulationTemplateJson<any>({ baseUrl, ref_ademe: refAdeme, accessToken });
+        if (cancelled) return;
+
+        const sourceRuns: any[] = Array.isArray(template)
+          ? template
+          : (template && Array.isArray(template.runs) ? template.runs : []);
+
+        const transformedRuns = sourceRuns.map((run) => {
+          const forced = run?.parameters?.input_forced || {};
+          const scenarios = Array.isArray(run?.scenarios) ? run.scenarios : [];
+          const nextScenarios = scenarios.map((sc: any) => {
+            const baseInput = (sc && sc.input && typeof sc.input === "object") ? sc.input : {};
+            const mergedInput = { ...forced, ...baseInput };
+            return { ...sc, input: mergedInput };
+          });
+          const { parameters, ...rest } = run || {};
+          return { ...rest, scenarios: nextScenarios };
+        });
+
+        if (transformedRuns.length > 0) {
+          hasLoadedTemplateRef.current = true;
+          setJsonText(JSON.stringify(transformedRuns, null, 2));
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    run();
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh") { run(); }
+      } catch {}
+    });
+    return () => { try { (removeHub as any)?.(); } catch {}; cancelled = true; };
+  }, [refAdeme]);
+
   // On init: if URL contains ?ref_ademe=..., call backoffice endpoint (Bearer included when available)
   useEffect(() => {
     if (hasInitFetchedRef.current) return;
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
     const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (simul === "default") return;
     if (!refAdeme) return;
 
     const controller = new AbortController();
