@@ -7,7 +7,7 @@ export interface ChainlitDrawerProps {
   title?: string;
 }
 
-export const ChainlitDrawer: React.FC<ChainlitDrawerProps> = ({ open, onClose, title = "Chainlit" }) => {
+export const ChainlitDrawer: React.FC<React.PropsWithChildren<ChainlitDrawerProps>> = ({ open, onClose, title = "Chainlit", children }) => {
   return (
     <Drawer
       open={open}
@@ -18,6 +18,7 @@ export const ChainlitDrawer: React.FC<ChainlitDrawerProps> = ({ open, onClose, t
       mask
     >
       <h1>{title}</h1>
+      {children}
     </Drawer>
   );
 };
