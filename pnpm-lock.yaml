@@ -234,6 +234,9 @@ importers:
 
   apps/simul:
     dependencies:
+      '@acme/chainlit':
+        specifier: workspace:*
+        version: link:../../packages/chainlit
       '@acme/dpe-editor':
         specifier: workspace:*
         version: link:../../packages/dpe-editor
@@ -293,6 +296,25 @@ importers:
       '@testing-library/react':
         specifier: ^14.3.1
         version: 14.3.1(@types/react@18.3.24)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.17)(jsdom@24.1.3)(sass-embedded@1.93.0)(sass@1.93.0)
+
+  packages/chainlit:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
       antd:
         specifier: ^5.27.4
         version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
