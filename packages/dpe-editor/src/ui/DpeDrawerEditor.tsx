@@ -1209,7 +1209,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   if (inline) {
     if (!open) return null;
     return (
-      <div style={{ width, height: "calc(100vh - 64px)", borderLeft: "1px solid #e5e7eb", background: "#fff", padding: 16, overflow: "auto" }}>
+      <div style={{ width, height: "calc(100vh - 64px)", borderRight: "1px solid #e5e7eb", background: "#fff", padding: 16, overflow: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>Edit DPE JSON</div>
           <Space>
@@ -1225,7 +1225,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   return (
     <Drawer
       title="Edit DPE JSON"
-      placement="right"
+      placement="left"
       open={open}
       onClose={handleDrawerClose}
       width={width}

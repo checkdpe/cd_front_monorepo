@@ -3,7 +3,7 @@ import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
 import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
-import { ExportOutlined } from "@ant-design/icons";
+import { ExportOutlined, LeftOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { LoadScenarioModal } from "@acme/load-scenario";
 import { DpeDrawerEditor, fetchSimulationTemplateJson } from "@acme/dpe-editor";
@@ -560,10 +560,76 @@ export const App: React.FC = () => {
       )}
       <div style={{ padding: 24 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+        {isEditorOpen ? (
+          <DpeDrawerEditor
+            inline
+            open={isEditorOpen}
+            onClose={() => setIsEditorOpen(false)}
+            width={480}
+            rootJsonText={jsonText}
+            onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+            apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+            getAccessToken={getAccessToken}
+            onLoadedFromApi={(data) => {
+              try {
+                const text = JSON.stringify(data, null, 2);
+                setJsonText((prev) => (prev?.trim() ? prev : text));
+              } catch {}
+            }}
+            onHighlightJsonPath={({ collection, itemKey, indices }) => {
+              try {
+                const ta = textAreaRef.current;
+                if (!ta) return;
+                const text = ta.value;
+                const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                let searchFrom = 0;
+                let scopeArrayStart = -1;
+                let scopeArrayEnd = -1;
+                while (true) {
+                  const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                  if (varIdx === -1) break;
+                  const quoteIdx = text.indexOf('"', varIdx + 18);
+                  const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                  const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                  if (value === variantPath) {
+                    const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                    if (scopeKeyIdx !== -1) {
+                      const openBracket = text.indexOf('[', scopeKeyIdx);
+                      if (openBracket !== -1) {
+                        scopeArrayStart = openBracket;
+                        const closeBracket = text.indexOf(']', openBracket);
+                        if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                      }
+                    }
+                    break;
+                  }
+                  searchFrom = varIdx + 1;
+                }
+                if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                const prevSelStart = ta.selectionStart;
+                const prevSelEnd = ta.selectionEnd;
+                const prevScrollTop = ta.scrollTop;
+                const prevScrollLeft = ta.scrollLeft;
+                try { (ta as any).focus({ preventScroll: true }); } catch { try { ta.focus(); } catch {} }
+                try { ta.setSelectionRange(scopeArrayStart, scopeArrayEnd); } catch {}
+                try { ta.scrollTop = prevScrollTop; ta.scrollLeft = prevScrollLeft; } catch {}
+                window.setTimeout(() => {
+                  try {
+                    (ta as any).focus({ preventScroll: true });
+                    ta.setSelectionRange(prevSelStart, prevSelEnd);
+                    ta.scrollTop = prevScrollTop;
+                    ta.scrollLeft = prevScrollLeft;
+                  } catch {}
+                }, 600);
+              } catch {}
+            }}
+          />
+        ) : null}
+
         <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 12 }}>
             <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
-            <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
+            <Button type="primary" size="large" icon={<LeftOutlined />} onClick={openEditor} disabled={isEditorOpen}>Edit</Button>
           </div>
           <Paragraph style={{ color: "#4b5563", marginTop: 4 }}>Provide JSON and configure options, then submit.</Paragraph>
           
@@ -754,71 +820,7 @@ export const App: React.FC = () => {
           </Card>
         </div>
 
-        {isEditorOpen ? (
-          <DpeDrawerEditor
-            inline
-            open={isEditorOpen}
-            onClose={() => setIsEditorOpen(false)}
-            width={480}
-            rootJsonText={jsonText}
-            onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
-            apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
-            getAccessToken={getAccessToken}
-            onLoadedFromApi={(data) => {
-              try {
-                const text = JSON.stringify(data, null, 2);
-                setJsonText((prev) => (prev?.trim() ? prev : text));
-              } catch {}
-            }}
-            onHighlightJsonPath={({ collection, itemKey, indices }) => {
-              try {
-                const ta = textAreaRef.current;
-                if (!ta) return;
-                const text = ta.value;
-                const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
-                let searchFrom = 0;
-                let scopeArrayStart = -1;
-                let scopeArrayEnd = -1;
-                while (true) {
-                  const varIdx = text.indexOf('"elements_variant"', searchFrom);
-                  if (varIdx === -1) break;
-                  const quoteIdx = text.indexOf('"', varIdx + 18);
-                  const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
-                  const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
-                  if (value === variantPath) {
-                    const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
-                    if (scopeKeyIdx !== -1) {
-                      const openBracket = text.indexOf('[', scopeKeyIdx);
-                      if (openBracket !== -1) {
-                        scopeArrayStart = openBracket;
-                        const closeBracket = text.indexOf(']', openBracket);
-                        if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
-                      }
-                    }
-                    break;
-                  }
-                  searchFrom = varIdx + 1;
-                }
-                if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
-                const prevSelStart = ta.selectionStart;
-                const prevSelEnd = ta.selectionEnd;
-                const prevScrollTop = ta.scrollTop;
-                const prevScrollLeft = ta.scrollLeft;
-                try { (ta as any).focus({ preventScroll: true }); } catch { try { ta.focus(); } catch {} }
-                try { ta.setSelectionRange(scopeArrayStart, scopeArrayEnd); } catch {}
-                try { ta.scrollTop = prevScrollTop; ta.scrollLeft = prevScrollLeft; } catch {}
-                window.setTimeout(() => {
-                  try {
-                    (ta as any).focus({ preventScroll: true });
-                    ta.setSelectionRange(prevSelStart, prevSelEnd);
-                    ta.scrollTop = prevScrollTop;
-                    ta.scrollLeft = prevScrollLeft;
-                  } catch {}
-                }, 600);
-              } catch {}
-            }}
-          />
-        ) : null}
+        
 
       </div>
       </div>
