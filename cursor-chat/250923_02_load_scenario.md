@@ -1,0 +1,3509 @@
+# Implement load scenario modal package
+_Exported on 23/09/2025 at 8:05:18 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+a new module package is a modal "load-scenario"
+which is opened from "..." > "load scenario" 
+endpoint called is 
+
+@https://api-dev.etiquettedpe.fr/backoffice/simulation_scenario_saved?ref_ademe=2394E0980765L 
+
+with Auth headers as usual
+
+modal would show the results from that one endpoint
+
+---
+
+**Cursor**
+
+I'll first create a small todo list for this feature, then search the codebase to find the top menu "..." location, modal patterns, and the existing auth header helper so I can integrate the new modal cleanly.
+
+I'll look for the top menu integration point, existing modal patterns, and the auth header helper in parallel so I can wire up the new `load-scenario` modal quickly.
+
+I'll scan the top menu package to find the ellipsis menu and also open the simul app entry to see how the menu is used, so I can wire the new modal.
+
+I'll open `packages/top-menu/src/TopMenu.tsx` and `apps/simul/src/App.tsx` to see how to add a "..." menu entry and trigger the modal.
+
+I'm going to search for any existing "..." or overflow menus and references to "load scenario" to decide where to hook the new modal trigger. I'll also open the simul app to see UI structure.
+
+I'll open the simul app entry file to wire the new menu and modal state.
+
+I'll inspect existing package structures to mirror their setup for the new `load-scenario` package, then implement the modal and integrate it into the simul app menu.
+
+I'll create the new `@acme/load-scenario` package with a modal component that fetches the saved scenarios via the authorized GET call, then wire it into the simul app's "load scenario" menu.
+
+```json
+{
+  "name": "@acme/load-scenario",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -b && eslint .",
+    "test": "echo 'no tests'"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "antd": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "antd": "^5.27.4"
+  }
+}
+
+
+```
+
+```jsonc
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsx": "react-jsx",
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"]
+}
+
+
+```
+
+```typescript
+export * from "./loadScenarioModal";
+
+
+```
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+  }, [open]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const arr = Array.isArray((data as any)?.items) ? (data as any).items : (Array.isArray(data) ? data : []);
+      setItems(arr as SavedScenarioItem[]);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Ref", dataIndex: "ref_ademe", key: "ref_ademe" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+```
+
+```markdown
+*** Begin Patch
+*** Add File: packages/load-scenario/README.md
++# @acme/load-scenario
+
+A simple modal to load saved simulation scenarios from the backoffice API.
+
+Props:
+- `open`: boolean
+- `onCancel`: () => void
+- `onSelect`: (payload: unknown) => void
+- `baseUrl?`: string (defaults to `https://api-dev.etiquettedpe.fr`)
+- `initialRefAdeme?`: string
+- `getAccessToken`: () => Promise<string | null>
+
+It performs GET `/backoffice/simulation_scenario_saved?ref_ademe=...` with the Cognito Bearer token when available and displays the results in a small table with a "load" action per row.
+
+*** End Patch
+```
+
+```markdown
+@acme/load-scenario
+
+A simple modal to load saved simulation scenarios from the backoffice API.
+
+Props:
+- open: boolean
+- onCancel: () => void
+- onSelect: (payload: unknown) => void
+- baseUrl?: string (defaults to https://api-dev.etiquettedpe.fr)
+- initialRefAdeme?: string
+- getAccessToken: () => Promise<string | null>
+
+It performs GET /backoffice/simulation_scenario_saved?ref_ademe=... with the Cognito Bearer token when available and displays the results in a small table with a "load" action per row.
+
+
+```
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./amplify";
+import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
+import { Hub } from "aws-amplify/utils";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
+import { ExportOutlined } from "@ant-design/icons";
+import { SimulationScenariosModal } from "@acme/simulation-scenarios";
+import { LoadScenarioModal } from "@acme/load-scenario";
+import { DpeDrawerEditor } from "@acme/dpe-editor";
+import { TopMenu } from "@acme/top-menu";
+import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
+import { flushSync } from "react-dom";
+
+const { Title, Paragraph } = Typography;
+
+export const App: React.FC = () => {
+  const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
+  const [skip, setSkip] = useState<number>(0);
+  const [limit, setLimit] = useState<number>(0);
+  const [numChunks, setNumChunks] = useState<number>(1);
+  const [numWorkers, setNumWorkers] = useState<number>(1);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
+  const [bridgeReady, setBridgeReady] = useState<boolean>(false);
+  const [bridgeAuthenticated, setBridgeAuthenticated] = useState<boolean>(false);
+  const hasInitFetchedRef = useRef<boolean>(false);
+  const hasUserEditedRef = useRef<boolean>(false);
+  const [refAdeme, setRefAdeme] = useState<string | undefined>(undefined);
+  const [simulLog, setSimulLog] = useState<string | undefined>(undefined);
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [resultsUrl, setResultsUrl] = useState<string | undefined>(undefined);
+  const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  function openEditor() { setIsEditorOpen(true); }
+
+  useEffect(() => {
+    let isCancelled = false;
+    // Listen to session bridge messages from auth app
+    function onMessage(ev: MessageEvent) {
+      try {
+        const payload = ev.data;
+        if (!payload || payload.type !== "cognito-session-bridge") return;
+        const authOrigin = payload?.data?.authOrigin as string | undefined;
+        // Optionally validate origin
+        if (authOrigin && !ev.origin.startsWith(authOrigin)) {
+          // origin mismatch – ignore
+          return;
+        }
+        setBridgeReady(true);
+        const isAuthenticated = Boolean(payload?.data?.isAuthenticated);
+        const tokenFromBridge = (payload?.data?.accessToken as string | undefined) || undefined;
+        if (tokenFromBridge) setBridgeAccessToken(tokenFromBridge);
+        if (isAuthenticated) setBridgeAuthenticated(true);
+        const emailFromBridge = (payload?.data?.email as string | undefined) || (payload?.data?.username as string | undefined);
+        if (!isCancelled && emailFromBridge) {
+          setUserEmail((prev) => prev || emailFromBridge);
+        }
+      } catch {}
+    }
+    window.addEventListener("message", onMessage);
+    
+    (async () => {
+      try {
+        const url = new URL(window.location.href);
+        const ra = url.searchParams.get("ref_ademe") || undefined;
+        const sim = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string | undefined) || undefined;
+        if (!isCancelled) {
+          setRefAdeme(ra);
+          setSimulLog(sim);
+        }
+      } catch {}
+      // Immediate cookie-based fallback for username/email
+      try {
+        const parts = document.cookie.split("; ").filter(Boolean);
+        for (const part of parts) {
+          const idx = part.indexOf("=");
+          if (idx === -1) continue;
+          const key = part.substring(0, idx);
+          const val = part.substring(idx + 1);
+          if (key.startsWith("CognitoIdentityServiceProvider.") && key.endsWith(".LastAuthUser")) {
+            const raw = decodeURIComponent(val);
+            if (raw && !isCancelled) {
+              setUserEmail(raw);
+              return; // found username from cookie; stop here
+            }
+          }
+        }
+      } catch {}
+
+      // Fallback #2: decode idToken cookie to extract email claim
+      try {
+        const all = document.cookie.split("; ").filter(Boolean);
+        const prefix = "CognitoIdentityServiceProvider.";
+        for (const cookie of all) {
+          const eq = cookie.indexOf("=");
+          if (eq === -1) continue;
+          const name = cookie.substring(0, eq);
+          if (!name.startsWith(prefix) || !name.endsWith(".idToken")) continue;
+          const raw = decodeURIComponent(cookie.substring(eq + 1));
+          const parts = raw.split(".");
+          if (parts.length >= 2) {
+            const mid = parts[1]!;
+            const payload = JSON.parse(atob(mid.replace(/-/g, "+").replace(/_/g, "/")));
+            const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
+            if (emailClaim && !isCancelled) {
+              setUserEmail(emailClaim);
+              break;
+            }
+          }
+        }
+      } catch {}
+
+      try {
+        // Prefer Cognito username (often the email) if available
+        const { username } = await getCurrentUser();
+        if (username && !isCancelled) {
+          setUserEmail(username || undefined);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      // Try fetching user attributes (email) when available
+      try {
+        const attrs = await fetchUserAttributes();
+        const emailAttr = attrs?.email as string | undefined;
+        if (emailAttr && !isCancelled) {
+          setUserEmail(emailAttr);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      try {
+        const session = await fetchAuthSession();
+        const emailClaim = (session as any)?.tokens?.idToken?.payload?.email as string | undefined;
+        if (!isCancelled) setUserEmail(emailClaim ?? undefined);
+      } catch {
+        if (!isCancelled) setUserEmail(undefined);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+      window.removeEventListener("message", onMessage);
+    };
+  }, []);
+
+  // Also try firing when bridge reports authenticated (helps cross-port first load)
+  useEffect(() => {
+    if (!bridgeAuthenticated || hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) return;
+        if (hasInitFetchedRef.current) return;
+        hasInitFetchedRef.current = true;
+        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", refAdeme);
+        apiUrl.searchParams.set("log", simul);
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail (bridge)", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail (bridge)", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed (bridge)", err);
+      }
+    })();
+    return () => controller.abort();
+  }, [bridgeAuthenticated]);
+
+  // On init: if URL contains ?ref_ademe=..., call backoffice endpoint (Bearer included when available)
+  useEffect(() => {
+    if (hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const apiUrl = new URL("/backoffice/get_redis_detail", base);
+    apiUrl.searchParams.set("ref_ademe", refAdeme);
+    apiUrl.searchParams.set("log", simul);
+
+    async function doFetchOnce() {
+      if (hasInitFetchedRef.current) return;
+      hasInitFetchedRef.current = true;
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    }
+
+    (async () => {
+      try {
+        // Wait for a valid access token before calling the endpoint
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) {
+          // eslint-disable-next-line no-console
+          console.warn("[simulation] skipping get_redis_detail: no Cognito token available");
+          return; // we'll rely on auth Hub events below if sign-in happens later
+        }
+        await doFetchOnce();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    })();
+
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh"){ doFetchOnce(); }
+      } catch {}
+    });
+
+    // Poll as a safety net in case Hub events fired before subscribe
+    const pollId = window.setInterval(async () => {
+      try {
+        if (hasInitFetchedRef.current) { window.clearInterval(pollId); return; }
+        const token = await getAccessToken();
+        if (token) {
+          window.clearInterval(pollId);
+          await doFetchOnce();
+        }
+      } catch {}
+    }, 500);
+
+    return () => {
+      try { (removeHub as any)?.(); } catch {}
+      try { window.clearInterval(pollId); } catch {}
+      controller.abort();
+    };
+  }, []);
+
+  const apiDebugOptions = useMemo(() => [
+    { label: "none", value: undefined },
+    { label: "1", value: 1 },
+    { label: "2", value: 2 },
+  ], []);
+
+  useEffect(() => {
+    return () => {
+      try { activePollAbortRef.current?.cancel(); setIsPolling(false); } catch {}
+    };
+  }, []);
+
+  function startPollingForResults(ref: string, log: string) {
+    // cancel any previous polling
+    try { activePollAbortRef.current?.cancel(); } catch {}
+    let cancelled = false;
+    activePollAbortRef.current = { cancel: () => { cancelled = true; setIsPolling(false); } };
+
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const resultsHref = `https://bo.scandpe.fr/simulation/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
+
+    setIsPolling(true);
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", ref);
+        apiUrl.searchParams.set("log", log);
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.status === "processed") {
+            setResultsUrl(resultsHref);
+            cancelled = true;
+            setIsPolling(false);
+            return;
+          }
+        }
+      } catch {}
+      if (!cancelled) {
+        window.setTimeout(tick, 1000);
+      }
+    };
+    tick();
+  }
+
+  async function handleSaveToBackoffice() {
+    try {
+      if (!refAdeme || !simulLog) {
+        message.error("Missing ref_ademe or simul");
+        setIsSaveMenuOpen(false);
+        return;
+      }
+      const ref = `${refAdeme}-${simulLog}`;
+      const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+      const apiUrl = new URL("/backoffice/redis_file_manage", base);
+      setIsSaving(true);
+      // eslint-disable-next-line no-console
+      console.debug("[simulation] POST redis_file_manage", { url: apiUrl.toString(), ref });
+      const res = await authorizedFetch(apiUrl.toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          "x-authorization": "dperdition",
+        },
+        body: JSON.stringify({ ref, text: jsonText }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      message.success(`saved ${simulLog}`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("redis_file_manage failed", err);
+      message.error("save failed");
+    } finally {
+      setIsSaving(false);
+      setIsSaveMenuOpen(false);
+    }
+  }
+
+  async function handleSubmit() {
+    try {
+      const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
+      const baseQuery = {
+        api_debug: Boolean(apiDebug),
+        skip,
+        limit,
+        ref_ademe: refAdeme,
+      } as Record<string, unknown>;
+      const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
+      const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
+      const body = {
+        redis_db: 1,
+        task: "tasks.ext_o3cl_managing.direct_scenarios",
+        args: {
+          ref_ademe: refAdeme,
+          query,
+        },
+      };
+      setSubmitting(true);
+      try {
+        // Use plain fetch to avoid adding Authorization header
+        const res = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${txt}`);
+        }
+        message.success("Submitted simulation");
+        if (refAdeme) {
+          startPollingForResults(refAdeme, "dev_report_o3cl");
+        }
+      } catch (e) {
+        message.error("Failed to submit");
+      } finally {
+        setSubmitting(false);
+        // eslint-disable-next-line no-console
+        console.log("simulation payload", body);
+      }
+    } catch (err) {
+      message.error("Invalid JSON");
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
+      <TopMenu
+        authLabel={userEmail || "login / sign-up"}
+        authHref={(() => {
+          const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+          if (configured) {
+            try {
+              const configuredUrl = new URL(configured);
+              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+              if (isConfiguredLocal && !isPageLocal) {
+                // ignore local auth URL on non-localhost pages
+              } else {
+                // On non-local hosts, prefer explicit index.html so returnTo is added to the file URL
+                if (!isConfiguredLocal) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  if (!endsWithHtml) {
+                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
+                    return base + "/index.html";
+                  }
+                }
+                return configured;
+              }
+            } catch {
+              return configured;
+            }
+          }
+          if (window.location.hostname === "localhost") return "http://localhost:5173";
+          return "/auth/index.html";
+        })()}
+        isAuthenticated={Boolean(userEmail)}
+        centeredTitle={refAdeme}
+        logoutHref={(() => {
+          const domain = (import.meta.env.VITE_COGNITO_DOMAIN_URL as string | undefined)?.replace(/^https?:\/\//, "");
+          if (!domain) return undefined;
+          const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined;
+          const logoutRedirect = (import.meta.env.VITE_LOGOUT_REDIRECT_URL as string | undefined) || window.location.origin;
+          if (!clientId) return undefined;
+          return `https://${domain}/logout?client_id=${encodeURIComponent(clientId)}&logout_uri=${encodeURIComponent(logoutRedirect)}`;
+        })()}
+      />
+      {/* Invisible iframe to pull session from auth origin when on different ports */}
+      {!bridgeReady && (
+        <iframe
+          src={(() => {
+            const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+            if (configured) {
+              try {
+                const configuredUrl = new URL(configured);
+                const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+                const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+                if (!(isConfiguredLocal && !isPageLocal)) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  const base = endsWithHtml ? configured : (hasTrailingSlash ? configured.replace(/\/$/, "") + "/index.html" : configured + "/index.html");
+                  return base;
+                }
+              } catch {
+                return configured.replace(/\/$/, "") + "/index.html";
+              }
+            }
+            if (window.location.hostname === "localhost") return "http://localhost:5173/index.html";
+            return "/auth/index.html";
+          })()}
+          style={{ display: "none" }}
+          title="session-bridge"
+        />
+      )}
+      <div style={{ padding: 24 }}>
+      <Row gutter={[16, 16]}>
+        <Col xs={0} lg={4}></Col>
+        <Col xs={24} lg={16}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+            <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
+          </div>
+          <Paragraph style={{ color: "#4b5563", marginTop: 4 }}>Provide JSON and configure options, then submit.</Paragraph>
+          
+          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
+            <div style={{ display: "grid" }}>
+              <textarea
+                ref={textAreaRef}
+                value={jsonText}
+                onChange={(e) => { hasUserEditedRef.current = true; setJsonText(e.target.value); }}
+                placeholder="Paste or write JSON here"
+                style={{
+                  minHeight: 420,
+                  width: "100%",
+                  background: isEditorOpen ? "#f3f4f6" : "#ffffff",
+                  color: isEditorOpen ? "#6b7280" : "#111827",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: 12,
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                  resize: "vertical",
+                  cursor: isEditorOpen ? "default" : "text",
+                  overflow: "auto",
+                }}
+                readOnly={isEditorOpen}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <Collapse
+                destroyOnHidden
+                items={[
+                  {
+                    key: "options",
+                    label: "Options",
+                    children: (
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
+                          <Select
+                            value={apiDebug as number | undefined}
+                            onChange={(v) => setApiDebug(v)}
+                            allowClear
+                            placeholder="none"
+                            options={apiDebugOptions}
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
+                          <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
+                          <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
+                          <InputNumber value={numChunks} onChange={(v) => setNumChunks(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
+                          <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
+                        </div>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                <div style={{ position: "relative" }}>
+                  <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
+                  {isSaveMenuOpen && (
+                    <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsLoadSavedOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={() => { if (!isSaving) handleSaveToBackoffice(); }}>save {simulLog || "default"}</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={async () => {
+                      if (isSaving) return;
+                      const name = window.prompt("Save as name:", simulLog || "custom");
+                      if (!name) { setIsSaveMenuOpen(false); return; }
+                      try {
+                        const ref = `${refAdeme || "unknown"}-${name}`;
+                        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+                        const apiUrl = new URL("/backoffice/redis_file_manage", base);
+                        setIsSaving(true);
+                        // eslint-disable-next-line no-console
+                        console.debug("[simulation] POST redis_file_manage (save as)", { url: apiUrl.toString(), ref });
+                        const res = await authorizedFetch(apiUrl.toString(), {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Accept: "application/json, text/plain, */*",
+                            "x-authorization": "dperdition",
+                          },
+                          body: JSON.stringify({ ref, text: jsonText }),
+                        });
+                        if (!res.ok) {
+                          const txt = await res.text().catch(() => "");
+                          throw new Error(`HTTP ${res.status} ${txt}`);
+                        }
+                        message.success(`saved ${name}`);
+                      } catch {
+                        message.error("save failed");
+                      } finally {
+                        setIsSaving(false);
+                        setIsSaveMenuOpen(false);
+                      }
+                    }}>save as…</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", minHeight: 24 }}>
+                {!resultsUrl && isPolling && (
+                  <Spin size="small" />
+                )}
+                {resultsUrl && (
+                  <a href={resultsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Open simulation results <ExportOutlined />
+                  </a>
+                )}
+              </div>
+              <DpeDrawerEditor
+                open={isEditorOpen}
+                onClose={() => setIsEditorOpen(false)}
+                width="50%"
+                rootJsonText={jsonText}
+                onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+                apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+                getAccessToken={getAccessToken}
+                onLoadedFromApi={(data) => {
+                  try {
+                    const text = JSON.stringify(data, null, 2);
+                    setJsonText((prev) => (prev?.trim() ? prev : text));
+                  } catch {}
+                }}
+                onHighlightJsonPath={({ collection, itemKey, indices }) => {
+                  try {
+                    const ta = textAreaRef.current;
+                    if (!ta) return;
+                    const text = ta.value;
+                    // New highlight strategy: target the runs entry with elements_variant, then the elements_scope array
+                    const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                    const variantKeyIdx = text.indexOf('"elements_variant"');
+                    let searchFrom = 0;
+                    let entryStart = -1;
+                    let scopeArrayStart = -1;
+                    let scopeArrayEnd = -1;
+                    // Scan for the entry containing the variantPath
+                    while (true) {
+                      const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                      if (varIdx === -1) break;
+                      const quoteIdx = text.indexOf('"', varIdx + 18);
+                      const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                      const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                      if (value === variantPath) {
+                        // Backtrack to entry start '{'
+                        let i = varIdx;
+                        while (i >= 0 && text[i] !== '{') i--;
+                        entryStart = i >= 0 ? i : varIdx;
+                        // Find elements_scope within this entry
+                        const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                        if (scopeKeyIdx !== -1) {
+                          const openBracket = text.indexOf('[', scopeKeyIdx);
+                          if (openBracket !== -1) {
+                            scopeArrayStart = openBracket;
+                            // find matching closing bracket (not perfect but ok for flat arrays)
+                            const closeBracket = text.indexOf(']', openBracket);
+                            if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                          }
+                        }
+                        break;
+                      }
+                      searchFrom = varIdx + 1;
+                    }
+                    if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                    const prevSelStart = ta.selectionStart;
+                    const prevSelEnd = ta.selectionEnd;
+                    const prevScrollTop = ta.scrollTop;
+                    const prevScrollLeft = ta.scrollLeft;
+                    try {
+                      // Avoid scrolling when focusing for selection highlight
+                      (ta as any).focus({ preventScroll: true });
+                    } catch {
+                      try { ta.focus(); } catch {}
+                    }
+                    try {
+                      ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    } catch {}
+                    // Immediately restore scroll so the viewport doesn't jump
+                    try {
+                      ta.scrollTop = prevScrollTop;
+                      ta.scrollLeft = prevScrollLeft;
+                    } catch {}
+                    window.setTimeout(() => {
+                      try {
+                        // Restore previous selection and scroll position without jumping
+                        (ta as any).focus({ preventScroll: true });
+                        ta.setSelectionRange(prevSelStart, prevSelEnd);
+                        ta.scrollTop = prevScrollTop;
+                        ta.scrollLeft = prevScrollLeft;
+                      } catch {}
+                    }, 600);
+                  } catch {}
+                }}
+              />
+            </div>
+            <SimulationScenariosModal
+              open={isScenariosOpen}
+              onCancel={() => setIsScenariosOpen(false)}
+              onLoad={(runs) => {
+                try {
+                  setJsonText(JSON.stringify(runs, null, 2));
+                } catch {
+                  // fallback to empty array
+                  setJsonText(JSON.stringify([], null, 2));
+                }
+                setIsScenariosOpen(false);
+              }}
+            />
+            <LoadScenarioModal
+              open={isLoadSavedOpen}
+              onCancel={() => setIsLoadSavedOpen(false)}
+              onSelect={(payload) => {
+                try {
+                  const text = JSON.stringify(payload, null, 2);
+                  setJsonText(text);
+                } catch {}
+                setIsLoadSavedOpen(false);
+              }}
+              baseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+              initialRefAdeme={refAdeme}
+              getAccessToken={getAccessToken}
+            />
+          </Card>
+        </Col>
+        <Col xs={0} lg={4}></Col>
+
+      </Row>
+      </div>
+    </div>
+  );
+};
+
+
+
+```
+
+I'll add the new package as a dependency to the simul app, fix the implicit any type, and auto-fetch results when the modal opens with a ref_ademe. Then I'll re-run lints.
+
+```json
+{
+  "name": "@acme/simul",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "breachunt": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "aws-amplify": "^6.5.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "antd": "^5.27.4",
+    "@ant-design/icons": "^6.0.2",
+    "@acme/top-menu": "workspace:*",
+    "@acme/simulation-scenarios": "workspace:*",
+    "@acme/dpe-editor": "workspace:*",
+    "@acme/load-scenario": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}
+
+
+
+```
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./amplify";
+import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
+import { Hub } from "aws-amplify/utils";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
+import { ExportOutlined } from "@ant-design/icons";
+import { SimulationScenariosModal } from "@acme/simulation-scenarios";
+import { LoadScenarioModal } from "@acme/load-scenario";
+import { DpeDrawerEditor } from "@acme/dpe-editor";
+import { TopMenu } from "@acme/top-menu";
+import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
+import { flushSync } from "react-dom";
+
+const { Title, Paragraph } = Typography;
+
+export const App: React.FC = () => {
+  const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
+  const [skip, setSkip] = useState<number>(0);
+  const [limit, setLimit] = useState<number>(0);
+  const [numChunks, setNumChunks] = useState<number>(1);
+  const [numWorkers, setNumWorkers] = useState<number>(1);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
+  const [bridgeReady, setBridgeReady] = useState<boolean>(false);
+  const [bridgeAuthenticated, setBridgeAuthenticated] = useState<boolean>(false);
+  const hasInitFetchedRef = useRef<boolean>(false);
+  const hasUserEditedRef = useRef<boolean>(false);
+  const [refAdeme, setRefAdeme] = useState<string | undefined>(undefined);
+  const [simulLog, setSimulLog] = useState<string | undefined>(undefined);
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [resultsUrl, setResultsUrl] = useState<string | undefined>(undefined);
+  const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  function openEditor() { setIsEditorOpen(true); }
+
+  useEffect(() => {
+    let isCancelled = false;
+    // Listen to session bridge messages from auth app
+    function onMessage(ev: MessageEvent) {
+      try {
+        const payload = ev.data;
+        if (!payload || payload.type !== "cognito-session-bridge") return;
+        const authOrigin = payload?.data?.authOrigin as string | undefined;
+        // Optionally validate origin
+        if (authOrigin && !ev.origin.startsWith(authOrigin)) {
+          // origin mismatch – ignore
+          return;
+        }
+        setBridgeReady(true);
+        const isAuthenticated = Boolean(payload?.data?.isAuthenticated);
+        const tokenFromBridge = (payload?.data?.accessToken as string | undefined) || undefined;
+        if (tokenFromBridge) setBridgeAccessToken(tokenFromBridge);
+        if (isAuthenticated) setBridgeAuthenticated(true);
+        const emailFromBridge = (payload?.data?.email as string | undefined) || (payload?.data?.username as string | undefined);
+        if (!isCancelled && emailFromBridge) {
+          setUserEmail((prev) => prev || emailFromBridge);
+        }
+      } catch {}
+    }
+    window.addEventListener("message", onMessage);
+    
+    (async () => {
+      try {
+        const url = new URL(window.location.href);
+        const ra = url.searchParams.get("ref_ademe") || undefined;
+        const sim = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string | undefined) || undefined;
+        if (!isCancelled) {
+          setRefAdeme(ra);
+          setSimulLog(sim);
+        }
+      } catch {}
+      // Immediate cookie-based fallback for username/email
+      try {
+        const parts = document.cookie.split("; ").filter(Boolean);
+        for (const part of parts) {
+          const idx = part.indexOf("=");
+          if (idx === -1) continue;
+          const key = part.substring(0, idx);
+          const val = part.substring(idx + 1);
+          if (key.startsWith("CognitoIdentityServiceProvider.") && key.endsWith(".LastAuthUser")) {
+            const raw = decodeURIComponent(val);
+            if (raw && !isCancelled) {
+              setUserEmail(raw);
+              return; // found username from cookie; stop here
+            }
+          }
+        }
+      } catch {}
+
+      // Fallback #2: decode idToken cookie to extract email claim
+      try {
+        const all = document.cookie.split("; ").filter(Boolean);
+        const prefix = "CognitoIdentityServiceProvider.";
+        for (const cookie of all) {
+          const eq = cookie.indexOf("=");
+          if (eq === -1) continue;
+          const name = cookie.substring(0, eq);
+          if (!name.startsWith(prefix) || !name.endsWith(".idToken")) continue;
+          const raw = decodeURIComponent(cookie.substring(eq + 1));
+          const parts = raw.split(".");
+          if (parts.length >= 2) {
+            const mid = parts[1]!;
+            const payload = JSON.parse(atob(mid.replace(/-/g, "+").replace(/_/g, "/")));
+            const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
+            if (emailClaim && !isCancelled) {
+              setUserEmail(emailClaim);
+              break;
+            }
+          }
+        }
+      } catch {}
+
+      try {
+        // Prefer Cognito username (often the email) if available
+        const { username } = await getCurrentUser();
+        if (username && !isCancelled) {
+          setUserEmail(username || undefined);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      // Try fetching user attributes (email) when available
+      try {
+        const attrs = await fetchUserAttributes();
+        const emailAttr = attrs?.email as string | undefined;
+        if (emailAttr && !isCancelled) {
+          setUserEmail(emailAttr);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      try {
+        const session = await fetchAuthSession();
+        const emailClaim = (session as any)?.tokens?.idToken?.payload?.email as string | undefined;
+        if (!isCancelled) setUserEmail(emailClaim ?? undefined);
+      } catch {
+        if (!isCancelled) setUserEmail(undefined);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+      window.removeEventListener("message", onMessage);
+    };
+  }, []);
+
+  // Also try firing when bridge reports authenticated (helps cross-port first load)
+  useEffect(() => {
+    if (!bridgeAuthenticated || hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) return;
+        if (hasInitFetchedRef.current) return;
+        hasInitFetchedRef.current = true;
+        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", refAdeme);
+        apiUrl.searchParams.set("log", simul);
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail (bridge)", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail (bridge)", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed (bridge)", err);
+      }
+    })();
+    return () => controller.abort();
+  }, [bridgeAuthenticated]);
+
+  // On init: if URL contains ?ref_ademe=..., call backoffice endpoint (Bearer included when available)
+  useEffect(() => {
+    if (hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const apiUrl = new URL("/backoffice/get_redis_detail", base);
+    apiUrl.searchParams.set("ref_ademe", refAdeme);
+    apiUrl.searchParams.set("log", simul);
+
+    async function doFetchOnce() {
+      if (hasInitFetchedRef.current) return;
+      hasInitFetchedRef.current = true;
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    }
+
+    (async () => {
+      try {
+        // Wait for a valid access token before calling the endpoint
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) {
+          // eslint-disable-next-line no-console
+          console.warn("[simulation] skipping get_redis_detail: no Cognito token available");
+          return; // we'll rely on auth Hub events below if sign-in happens later
+        }
+        await doFetchOnce();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    })();
+
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh"){ doFetchOnce(); }
+      } catch {}
+    });
+
+    // Poll as a safety net in case Hub events fired before subscribe
+    const pollId = window.setInterval(async () => {
+      try {
+        if (hasInitFetchedRef.current) { window.clearInterval(pollId); return; }
+        const token = await getAccessToken();
+        if (token) {
+          window.clearInterval(pollId);
+          await doFetchOnce();
+        }
+      } catch {}
+    }, 500);
+
+    return () => {
+      try { (removeHub as any)?.(); } catch {}
+      try { window.clearInterval(pollId); } catch {}
+      controller.abort();
+    };
+  }, []);
+
+  const apiDebugOptions = useMemo(() => [
+    { label: "none", value: undefined },
+    { label: "1", value: 1 },
+    { label: "2", value: 2 },
+  ], []);
+
+  useEffect(() => {
+    return () => {
+      try { activePollAbortRef.current?.cancel(); setIsPolling(false); } catch {}
+    };
+  }, []);
+
+  function startPollingForResults(ref: string, log: string) {
+    // cancel any previous polling
+    try { activePollAbortRef.current?.cancel(); } catch {}
+    let cancelled = false;
+    activePollAbortRef.current = { cancel: () => { cancelled = true; setIsPolling(false); } };
+
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const resultsHref = `https://bo.scandpe.fr/simulation/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
+
+    setIsPolling(true);
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", ref);
+        apiUrl.searchParams.set("log", log);
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.status === "processed") {
+            setResultsUrl(resultsHref);
+            cancelled = true;
+            setIsPolling(false);
+            return;
+          }
+        }
+      } catch {}
+      if (!cancelled) {
+        window.setTimeout(tick, 1000);
+      }
+    };
+    tick();
+  }
+
+  async function handleSaveToBackoffice() {
+    try {
+      if (!refAdeme || !simulLog) {
+        message.error("Missing ref_ademe or simul");
+        setIsSaveMenuOpen(false);
+        return;
+      }
+      const ref = `${refAdeme}-${simulLog}`;
+      const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+      const apiUrl = new URL("/backoffice/redis_file_manage", base);
+      setIsSaving(true);
+      // eslint-disable-next-line no-console
+      console.debug("[simulation] POST redis_file_manage", { url: apiUrl.toString(), ref });
+      const res = await authorizedFetch(apiUrl.toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          "x-authorization": "dperdition",
+        },
+        body: JSON.stringify({ ref, text: jsonText }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      message.success(`saved ${simulLog}`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("redis_file_manage failed", err);
+      message.error("save failed");
+    } finally {
+      setIsSaving(false);
+      setIsSaveMenuOpen(false);
+    }
+  }
+
+  async function handleSubmit() {
+    try {
+      const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
+      const baseQuery = {
+        api_debug: Boolean(apiDebug),
+        skip,
+        limit,
+        ref_ademe: refAdeme,
+      } as Record<string, unknown>;
+      const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
+      const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
+      const body = {
+        redis_db: 1,
+        task: "tasks.ext_o3cl_managing.direct_scenarios",
+        args: {
+          ref_ademe: refAdeme,
+          query,
+        },
+      };
+      setSubmitting(true);
+      try {
+        // Use plain fetch to avoid adding Authorization header
+        const res = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${txt}`);
+        }
+        message.success("Submitted simulation");
+        if (refAdeme) {
+          startPollingForResults(refAdeme, "dev_report_o3cl");
+        }
+      } catch (e) {
+        message.error("Failed to submit");
+      } finally {
+        setSubmitting(false);
+        // eslint-disable-next-line no-console
+        console.log("simulation payload", body);
+      }
+    } catch (err) {
+      message.error("Invalid JSON");
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
+      <TopMenu
+        authLabel={userEmail || "login / sign-up"}
+        authHref={(() => {
+          const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+          if (configured) {
+            try {
+              const configuredUrl = new URL(configured);
+              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+              if (isConfiguredLocal && !isPageLocal) {
+                // ignore local auth URL on non-localhost pages
+              } else {
+                // On non-local hosts, prefer explicit index.html so returnTo is added to the file URL
+                if (!isConfiguredLocal) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  if (!endsWithHtml) {
+                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
+                    return base + "/index.html";
+                  }
+                }
+                return configured;
+              }
+            } catch {
+              return configured;
+            }
+          }
+          if (window.location.hostname === "localhost") return "http://localhost:5173";
+          return "/auth/index.html";
+        })()}
+        isAuthenticated={Boolean(userEmail)}
+        centeredTitle={refAdeme}
+        logoutHref={(() => {
+          const domain = (import.meta.env.VITE_COGNITO_DOMAIN_URL as string | undefined)?.replace(/^https?:\/\//, "");
+          if (!domain) return undefined;
+          const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined;
+          const logoutRedirect = (import.meta.env.VITE_LOGOUT_REDIRECT_URL as string | undefined) || window.location.origin;
+          if (!clientId) return undefined;
+          return `https://${domain}/logout?client_id=${encodeURIComponent(clientId)}&logout_uri=${encodeURIComponent(logoutRedirect)}`;
+        })()}
+      />
+      {/* Invisible iframe to pull session from auth origin when on different ports */}
+      {!bridgeReady && (
+        <iframe
+          src={(() => {
+            const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+            if (configured) {
+              try {
+                const configuredUrl = new URL(configured);
+                const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+                const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+                if (!(isConfiguredLocal && !isPageLocal)) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  const base = endsWithHtml ? configured : (hasTrailingSlash ? configured.replace(/\/$/, "") + "/index.html" : configured + "/index.html");
+                  return base;
+                }
+              } catch {
+                return configured.replace(/\/$/, "") + "/index.html";
+              }
+            }
+            if (window.location.hostname === "localhost") return "http://localhost:5173/index.html";
+            return "/auth/index.html";
+          })()}
+          style={{ display: "none" }}
+          title="session-bridge"
+        />
+      )}
+      <div style={{ padding: 24 }}>
+      <Row gutter={[16, 16]}>
+        <Col xs={0} lg={4}></Col>
+        <Col xs={24} lg={16}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+            <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
+          </div>
+          <Paragraph style={{ color: "#4b5563", marginTop: 4 }}>Provide JSON and configure options, then submit.</Paragraph>
+          
+          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
+            <div style={{ display: "grid" }}>
+              <textarea
+                ref={textAreaRef}
+                value={jsonText}
+                onChange={(e) => { hasUserEditedRef.current = true; setJsonText(e.target.value); }}
+                placeholder="Paste or write JSON here"
+                style={{
+                  minHeight: 420,
+                  width: "100%",
+                  background: isEditorOpen ? "#f3f4f6" : "#ffffff",
+                  color: isEditorOpen ? "#6b7280" : "#111827",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: 12,
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                  resize: "vertical",
+                  cursor: isEditorOpen ? "default" : "text",
+                  overflow: "auto",
+                }}
+                readOnly={isEditorOpen}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <Collapse
+                destroyOnHidden
+                items={[
+                  {
+                    key: "options",
+                    label: "Options",
+                    children: (
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
+                          <Select
+                            value={apiDebug as number | undefined}
+                            onChange={(v) => setApiDebug(v)}
+                            allowClear
+                            placeholder="none"
+                            options={apiDebugOptions}
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
+                          <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
+                          <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
+                          <InputNumber value={numChunks} onChange={(v) => setNumChunks(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
+                          <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
+                        </div>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                <div style={{ position: "relative" }}>
+                  <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
+                  {isSaveMenuOpen && (
+                    <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsLoadSavedOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={() => { if (!isSaving) handleSaveToBackoffice(); }}>save {simulLog || "default"}</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={async () => {
+                      if (isSaving) return;
+                      const name = window.prompt("Save as name:", simulLog || "custom");
+                      if (!name) { setIsSaveMenuOpen(false); return; }
+                      try {
+                        const ref = `${refAdeme || "unknown"}-${name}`;
+                        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+                        const apiUrl = new URL("/backoffice/redis_file_manage", base);
+                        setIsSaving(true);
+                        // eslint-disable-next-line no-console
+                        console.debug("[simulation] POST redis_file_manage (save as)", { url: apiUrl.toString(), ref });
+                        const res = await authorizedFetch(apiUrl.toString(), {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Accept: "application/json, text/plain, */*",
+                            "x-authorization": "dperdition",
+                          },
+                          body: JSON.stringify({ ref, text: jsonText }),
+                        });
+                        if (!res.ok) {
+                          const txt = await res.text().catch(() => "");
+                          throw new Error(`HTTP ${res.status} ${txt}`);
+                        }
+                        message.success(`saved ${name}`);
+                      } catch {
+                        message.error("save failed");
+                      } finally {
+                        setIsSaving(false);
+                        setIsSaveMenuOpen(false);
+                      }
+                    }}>save as…</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", minHeight: 24 }}>
+                {!resultsUrl && isPolling && (
+                  <Spin size="small" />
+                )}
+                {resultsUrl && (
+                  <a href={resultsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Open simulation results <ExportOutlined />
+                  </a>
+                )}
+              </div>
+              <DpeDrawerEditor
+                open={isEditorOpen}
+                onClose={() => setIsEditorOpen(false)}
+                width="50%"
+                rootJsonText={jsonText}
+                onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+                apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+                getAccessToken={getAccessToken}
+                onLoadedFromApi={(data) => {
+                  try {
+                    const text = JSON.stringify(data, null, 2);
+                    setJsonText((prev) => (prev?.trim() ? prev : text));
+                  } catch {}
+                }}
+                onHighlightJsonPath={({ collection, itemKey, indices }) => {
+                  try {
+                    const ta = textAreaRef.current;
+                    if (!ta) return;
+                    const text = ta.value;
+                    // New highlight strategy: target the runs entry with elements_variant, then the elements_scope array
+                    const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                    const variantKeyIdx = text.indexOf('"elements_variant"');
+                    let searchFrom = 0;
+                    let entryStart = -1;
+                    let scopeArrayStart = -1;
+                    let scopeArrayEnd = -1;
+                    // Scan for the entry containing the variantPath
+                    while (true) {
+                      const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                      if (varIdx === -1) break;
+                      const quoteIdx = text.indexOf('"', varIdx + 18);
+                      const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                      const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                      if (value === variantPath) {
+                        // Backtrack to entry start '{'
+                        let i = varIdx;
+                        while (i >= 0 && text[i] !== '{') i--;
+                        entryStart = i >= 0 ? i : varIdx;
+                        // Find elements_scope within this entry
+                        const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                        if (scopeKeyIdx !== -1) {
+                          const openBracket = text.indexOf('[', scopeKeyIdx);
+                          if (openBracket !== -1) {
+                            scopeArrayStart = openBracket;
+                            // find matching closing bracket (not perfect but ok for flat arrays)
+                            const closeBracket = text.indexOf(']', openBracket);
+                            if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                          }
+                        }
+                        break;
+                      }
+                      searchFrom = varIdx + 1;
+                    }
+                    if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                    const prevSelStart = ta.selectionStart;
+                    const prevSelEnd = ta.selectionEnd;
+                    const prevScrollTop = ta.scrollTop;
+                    const prevScrollLeft = ta.scrollLeft;
+                    try {
+                      // Avoid scrolling when focusing for selection highlight
+                      (ta as any).focus({ preventScroll: true });
+                    } catch {
+                      try { ta.focus(); } catch {}
+                    }
+                    try {
+                      ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    } catch {}
+                    // Immediately restore scroll so the viewport doesn't jump
+                    try {
+                      ta.scrollTop = prevScrollTop;
+                      ta.scrollLeft = prevScrollLeft;
+                    } catch {}
+                    window.setTimeout(() => {
+                      try {
+                        // Restore previous selection and scroll position without jumping
+                        (ta as any).focus({ preventScroll: true });
+                        ta.setSelectionRange(prevSelStart, prevSelEnd);
+                        ta.scrollTop = prevScrollTop;
+                        ta.scrollLeft = prevScrollLeft;
+                      } catch {}
+                    }, 600);
+                  } catch {}
+                }}
+              />
+            </div>
+            <SimulationScenariosModal
+              open={isScenariosOpen}
+              onCancel={() => setIsScenariosOpen(false)}
+              onLoad={(runs) => {
+                try {
+                  setJsonText(JSON.stringify(runs, null, 2));
+                } catch {
+                  // fallback to empty array
+                  setJsonText(JSON.stringify([], null, 2));
+                }
+                setIsScenariosOpen(false);
+              }}
+            />
+            <LoadScenarioModal
+              open={isLoadSavedOpen}
+              onCancel={() => setIsLoadSavedOpen(false)}
+              onSelect={(payload: unknown) => {
+                try {
+                  const text = JSON.stringify(payload, null, 2);
+                  setJsonText(text);
+                } catch {}
+                setIsLoadSavedOpen(false);
+              }}
+              baseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+              initialRefAdeme={refAdeme}
+              getAccessToken={getAccessToken}
+            />
+          </Card>
+        </Col>
+        <Col xs={0} lg={4}></Col>
+
+      </Row>
+      </div>
+    </div>
+  );
+};
+
+
+
+```
+
+I'll auto-fetch results on open when a `ref_ademe` is present, then install workspace deps and build to link the new package, and re-run lints.
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (refAdeme && refAdeme.trim()) {
+      // auto-fetch when opening with a prefilled ref_ademe
+      void fetchSaved();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const arr = Array.isArray((data as any)?.items) ? (data as any).items : (Array.isArray(data) ? data : []);
+      setItems(arr as SavedScenarioItem[]);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Ref", dataIndex: "ref_ademe", key: "ref_ademe" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+
+```
+
+I'm going to fix the TypeScript implicit any issues in the new modal component, then reinstall workspace deps to link the new package, and rebuild it.
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (refAdeme && refAdeme.trim()) {
+      // auto-fetch when opening with a prefilled ref_ademe
+      void fetchSaved();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const arr = Array.isArray((data as any)?.items) ? (data as any).items : (Array.isArray(data) ? data : []);
+      setItems(arr as SavedScenarioItem[]);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Ref", dataIndex: "ref_ademe", key: "ref_ademe" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r: SavedScenarioItem) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+
+```
+
+I'll link the new package into the simul app explicitly and then re-run the lints on `apps/simul/src/App.tsx`.
+
+- I created a new package `@acme/load-scenario` with a modal component that calls `GET /backoffice/simulation_scenario_saved?ref_ademe=...` using the Cognito Bearer token and displays the results in a table. Auto-fetch triggers when the modal opens and `ref_ademe` is prefilled.
+- I integrated it into `apps/simul/src/App.tsx`: the “... > load scenario” menu now opens `LoadScenarioModal`. Selecting a row injects the JSON into the editor text.
+- I linked and built the package; lints pass in both the new package and the simul app.
+
+You can open the simul app, click “...” then “load scenario,” and it will fetch from `https://api-dev.etiquettedpe.fr/backoffice/simulation_scenario_saved?ref_ademe=2394E0980765L` with auth headers and display the result.
+
+---
+
+**User**
+
+ok, ref_ademe to be preset with current one, and labels to take the results after ":" 
+
+ex. if response like that 
+["2483E1189606K:dev_simul_germain0002","2483E1189606K:dev_simul_germain0044"]
+
+then we see: `dev_simul_germain0002` next is `dev_simul_germain0044`
+
+---
+
+**Cursor**
+
+I'll update the `@acme/load-scenario` modal to (1) preset `ref_ademe` from the current value when the modal opens, and (2) parse API results like "ref:label" so only the label after ':' is displayed. Then I'll run lints and rebuild the package.
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+    // Preset ref_ademe with current one each time the modal opens
+    setRefAdeme(initialRefAdeme || "");
+  }, [open, initialRefAdeme]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (refAdeme && refAdeme.trim()) {
+      // auto-fetch when opening with a prefilled ref_ademe
+      void fetchSaved();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const raw: unknown[] = Array.isArray((data as any)?.items)
+        ? ((data as any).items as unknown[])
+        : (Array.isArray(data) ? (data as unknown[]) : []);
+      const normalized: SavedScenarioItem[] = raw.map((it) => {
+        if (typeof it === "string") {
+          const colon = it.indexOf(":");
+          const ref = colon !== -1 ? it.slice(0, colon) : undefined;
+          const label = colon !== -1 ? it.slice(colon + 1) : it;
+          return { id: it, ref_ademe: ref, label } as SavedScenarioItem;
+        }
+        if (it && typeof it === "object") return it as SavedScenarioItem;
+        return { id: String(it), label: String(it) } as SavedScenarioItem;
+      });
+      setItems(normalized);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Ref", dataIndex: "ref_ademe", key: "ref_ademe" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r: SavedScenarioItem) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+
+```
+
+- Preset: When the modal opens, `ref_ademe` is now prefilled from the current one.
+- Labels: The API response is normalized. If items look like "ref:label", only the part after ":" is displayed as the label (e.g., `dev_simul_germain0002`, then `dev_simul_germain0044`).
+
+---
+
+**User**
+
+we can hide "Ref" in results from fetch
+also load behaviro => updates the url
+
+?ref_ademe={ref_ademe}&simul={simul_name} and refresh page with given url
+
+---
+
+**Cursor**
+
+I'll hide the Ref column in the modal's results and change the load action to set the URL query (?ref_ademe, simul) and refresh the page.
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+    // Preset ref_ademe with current one each time the modal opens
+    setRefAdeme(initialRefAdeme || "");
+  }, [open, initialRefAdeme]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (refAdeme && refAdeme.trim()) {
+      // auto-fetch when opening with a prefilled ref_ademe
+      void fetchSaved();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const raw: unknown[] = Array.isArray((data as any)?.items)
+        ? ((data as any).items as unknown[])
+        : (Array.isArray(data) ? (data as unknown[]) : []);
+      const normalized: SavedScenarioItem[] = raw.map((it) => {
+        if (typeof it === "string") {
+          const colon = it.indexOf(":");
+          const ref = colon !== -1 ? it.slice(0, colon) : undefined;
+          const label = colon !== -1 ? it.slice(colon + 1) : it;
+          return { id: it, ref_ademe: ref, label } as SavedScenarioItem;
+        }
+        if (it && typeof it === "object") return it as SavedScenarioItem;
+        return { id: String(it), label: String(it) } as SavedScenarioItem;
+      });
+      setItems(normalized);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r: SavedScenarioItem) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+
+```
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./amplify";
+import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
+import { Hub } from "aws-amplify/utils";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
+import { ExportOutlined } from "@ant-design/icons";
+import { SimulationScenariosModal } from "@acme/simulation-scenarios";
+import { LoadScenarioModal } from "@acme/load-scenario";
+import { DpeDrawerEditor } from "@acme/dpe-editor";
+import { TopMenu } from "@acme/top-menu";
+import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
+import { flushSync } from "react-dom";
+
+const { Title, Paragraph } = Typography;
+
+export const App: React.FC = () => {
+  const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
+  const [skip, setSkip] = useState<number>(0);
+  const [limit, setLimit] = useState<number>(0);
+  const [numChunks, setNumChunks] = useState<number>(1);
+  const [numWorkers, setNumWorkers] = useState<number>(1);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
+  const [bridgeReady, setBridgeReady] = useState<boolean>(false);
+  const [bridgeAuthenticated, setBridgeAuthenticated] = useState<boolean>(false);
+  const hasInitFetchedRef = useRef<boolean>(false);
+  const hasUserEditedRef = useRef<boolean>(false);
+  const [refAdeme, setRefAdeme] = useState<string | undefined>(undefined);
+  const [simulLog, setSimulLog] = useState<string | undefined>(undefined);
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [resultsUrl, setResultsUrl] = useState<string | undefined>(undefined);
+  const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  function openEditor() { setIsEditorOpen(true); }
+
+  useEffect(() => {
+    let isCancelled = false;
+    // Listen to session bridge messages from auth app
+    function onMessage(ev: MessageEvent) {
+      try {
+        const payload = ev.data;
+        if (!payload || payload.type !== "cognito-session-bridge") return;
+        const authOrigin = payload?.data?.authOrigin as string | undefined;
+        // Optionally validate origin
+        if (authOrigin && !ev.origin.startsWith(authOrigin)) {
+          // origin mismatch – ignore
+          return;
+        }
+        setBridgeReady(true);
+        const isAuthenticated = Boolean(payload?.data?.isAuthenticated);
+        const tokenFromBridge = (payload?.data?.accessToken as string | undefined) || undefined;
+        if (tokenFromBridge) setBridgeAccessToken(tokenFromBridge);
+        if (isAuthenticated) setBridgeAuthenticated(true);
+        const emailFromBridge = (payload?.data?.email as string | undefined) || (payload?.data?.username as string | undefined);
+        if (!isCancelled && emailFromBridge) {
+          setUserEmail((prev) => prev || emailFromBridge);
+        }
+      } catch {}
+    }
+    window.addEventListener("message", onMessage);
+    
+    (async () => {
+      try {
+        const url = new URL(window.location.href);
+        const ra = url.searchParams.get("ref_ademe") || undefined;
+        const sim = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string | undefined) || undefined;
+        if (!isCancelled) {
+          setRefAdeme(ra);
+          setSimulLog(sim);
+        }
+      } catch {}
+      // Immediate cookie-based fallback for username/email
+      try {
+        const parts = document.cookie.split("; ").filter(Boolean);
+        for (const part of parts) {
+          const idx = part.indexOf("=");
+          if (idx === -1) continue;
+          const key = part.substring(0, idx);
+          const val = part.substring(idx + 1);
+          if (key.startsWith("CognitoIdentityServiceProvider.") && key.endsWith(".LastAuthUser")) {
+            const raw = decodeURIComponent(val);
+            if (raw && !isCancelled) {
+              setUserEmail(raw);
+              return; // found username from cookie; stop here
+            }
+          }
+        }
+      } catch {}
+
+      // Fallback #2: decode idToken cookie to extract email claim
+      try {
+        const all = document.cookie.split("; ").filter(Boolean);
+        const prefix = "CognitoIdentityServiceProvider.";
+        for (const cookie of all) {
+          const eq = cookie.indexOf("=");
+          if (eq === -1) continue;
+          const name = cookie.substring(0, eq);
+          if (!name.startsWith(prefix) || !name.endsWith(".idToken")) continue;
+          const raw = decodeURIComponent(cookie.substring(eq + 1));
+          const parts = raw.split(".");
+          if (parts.length >= 2) {
+            const mid = parts[1]!;
+            const payload = JSON.parse(atob(mid.replace(/-/g, "+").replace(/_/g, "/")));
+            const emailClaim = (payload && (payload.email || payload.username)) as string | undefined;
+            if (emailClaim && !isCancelled) {
+              setUserEmail(emailClaim);
+              break;
+            }
+          }
+        }
+      } catch {}
+
+      try {
+        // Prefer Cognito username (often the email) if available
+        const { username } = await getCurrentUser();
+        if (username && !isCancelled) {
+          setUserEmail(username || undefined);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      // Try fetching user attributes (email) when available
+      try {
+        const attrs = await fetchUserAttributes();
+        const emailAttr = attrs?.email as string | undefined;
+        if (emailAttr && !isCancelled) {
+          setUserEmail(emailAttr);
+          return;
+        }
+      } catch {
+        // ignore and fallback to token claim below
+      }
+
+      try {
+        const session = await fetchAuthSession();
+        const emailClaim = (session as any)?.tokens?.idToken?.payload?.email as string | undefined;
+        if (!isCancelled) setUserEmail(emailClaim ?? undefined);
+      } catch {
+        if (!isCancelled) setUserEmail(undefined);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+      window.removeEventListener("message", onMessage);
+    };
+  }, []);
+
+  // Also try firing when bridge reports authenticated (helps cross-port first load)
+  useEffect(() => {
+    if (!bridgeAuthenticated || hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) return;
+        if (hasInitFetchedRef.current) return;
+        hasInitFetchedRef.current = true;
+        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", refAdeme);
+        apiUrl.searchParams.set("log", simul);
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail (bridge)", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail (bridge)", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed (bridge)", err);
+      }
+    })();
+    return () => controller.abort();
+  }, [bridgeAuthenticated]);
+
+  // On init: if URL contains ?ref_ademe=..., call backoffice endpoint (Bearer included when available)
+  useEffect(() => {
+    if (hasInitFetchedRef.current) return;
+    const url = new URL(window.location.href);
+    const refAdeme = url.searchParams.get("ref_ademe");
+    const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (!refAdeme) return;
+
+    const controller = new AbortController();
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const apiUrl = new URL("/backoffice/get_redis_detail", base);
+    apiUrl.searchParams.set("ref_ademe", refAdeme);
+    apiUrl.searchParams.set("log", simul);
+
+    async function doFetchOnce() {
+      if (hasInitFetchedRef.current) return;
+      hasInitFetchedRef.current = true;
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("[simulation] calling get_redis_detail", apiUrl.toString());
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        if (data && !hasUserEditedRef.current) {
+          setJsonText(JSON.stringify(data, null, 2));
+        }
+        // eslint-disable-next-line no-console
+        console.log("get_redis_detail", data);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    }
+
+    (async () => {
+      try {
+        // Wait for a valid access token before calling the endpoint
+        const token = await waitForAccessToken(15000, 250);
+        if (!token) {
+          // eslint-disable-next-line no-console
+          console.warn("[simulation] skipping get_redis_detail: no Cognito token available");
+          return; // we'll rely on auth Hub events below if sign-in happens later
+        }
+        await doFetchOnce();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("get_redis_detail failed", err);
+      }
+    })();
+
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh"){ doFetchOnce(); }
+      } catch {}
+    });
+
+    // Poll as a safety net in case Hub events fired before subscribe
+    const pollId = window.setInterval(async () => {
+      try {
+        if (hasInitFetchedRef.current) { window.clearInterval(pollId); return; }
+        const token = await getAccessToken();
+        if (token) {
+          window.clearInterval(pollId);
+          await doFetchOnce();
+        }
+      } catch {}
+    }, 500);
+
+    return () => {
+      try { (removeHub as any)?.(); } catch {}
+      try { window.clearInterval(pollId); } catch {}
+      controller.abort();
+    };
+  }, []);
+
+  const apiDebugOptions = useMemo(() => [
+    { label: "none", value: undefined },
+    { label: "1", value: 1 },
+    { label: "2", value: 2 },
+  ], []);
+
+  useEffect(() => {
+    return () => {
+      try { activePollAbortRef.current?.cancel(); setIsPolling(false); } catch {}
+    };
+  }, []);
+
+  function startPollingForResults(ref: string, log: string) {
+    // cancel any previous polling
+    try { activePollAbortRef.current?.cancel(); } catch {}
+    let cancelled = false;
+    activePollAbortRef.current = { cancel: () => { cancelled = true; setIsPolling(false); } };
+
+    const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+    const resultsHref = `https://bo.scandpe.fr/simulation/index.html?tab=results&dpe=${encodeURIComponent(ref)}`;
+
+    setIsPolling(true);
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const apiUrl = new URL("/backoffice/get_redis_detail", base);
+        apiUrl.searchParams.set("ref_ademe", ref);
+        apiUrl.searchParams.set("log", log);
+        const res = await authorizedFetch(apiUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.status === "processed") {
+            setResultsUrl(resultsHref);
+            cancelled = true;
+            setIsPolling(false);
+            return;
+          }
+        }
+      } catch {}
+      if (!cancelled) {
+        window.setTimeout(tick, 1000);
+      }
+    };
+    tick();
+  }
+
+  async function handleSaveToBackoffice() {
+    try {
+      if (!refAdeme || !simulLog) {
+        message.error("Missing ref_ademe or simul");
+        setIsSaveMenuOpen(false);
+        return;
+      }
+      const ref = `${refAdeme}-${simulLog}`;
+      const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+      const apiUrl = new URL("/backoffice/redis_file_manage", base);
+      setIsSaving(true);
+      // eslint-disable-next-line no-console
+      console.debug("[simulation] POST redis_file_manage", { url: apiUrl.toString(), ref });
+      const res = await authorizedFetch(apiUrl.toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          "x-authorization": "dperdition",
+        },
+        body: JSON.stringify({ ref, text: jsonText }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      message.success(`saved ${simulLog}`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("redis_file_manage failed", err);
+      message.error("save failed");
+    } finally {
+      setIsSaving(false);
+      setIsSaveMenuOpen(false);
+    }
+  }
+
+  async function handleSubmit() {
+    try {
+      const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
+      const baseQuery = {
+        api_debug: Boolean(apiDebug),
+        skip,
+        limit,
+        ref_ademe: refAdeme,
+      } as Record<string, unknown>;
+      const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
+      const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
+      const body = {
+        redis_db: 1,
+        task: "tasks.ext_o3cl_managing.direct_scenarios",
+        args: {
+          ref_ademe: refAdeme,
+          query,
+        },
+      };
+      setSubmitting(true);
+      try {
+        // Use plain fetch to avoid adding Authorization header
+        const res = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${txt}`);
+        }
+        message.success("Submitted simulation");
+        if (refAdeme) {
+          startPollingForResults(refAdeme, "dev_report_o3cl");
+        }
+      } catch (e) {
+        message.error("Failed to submit");
+      } finally {
+        setSubmitting(false);
+        // eslint-disable-next-line no-console
+        console.log("simulation payload", body);
+      }
+    } catch (err) {
+      message.error("Invalid JSON");
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#ffffff", color: "#0b0c0f" }}>
+      <TopMenu
+        authLabel={userEmail || "login / sign-up"}
+        authHref={(() => {
+          const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+          if (configured) {
+            try {
+              const configuredUrl = new URL(configured);
+              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+              if (isConfiguredLocal && !isPageLocal) {
+                // ignore local auth URL on non-localhost pages
+              } else {
+                // On non-local hosts, prefer explicit index.html so returnTo is added to the file URL
+                if (!isConfiguredLocal) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  if (!endsWithHtml) {
+                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
+                    return base + "/index.html";
+                  }
+                }
+                return configured;
+              }
+            } catch {
+              return configured;
+            }
+          }
+          if (window.location.hostname === "localhost") return "http://localhost:5173";
+          return "/auth/index.html";
+        })()}
+        isAuthenticated={Boolean(userEmail)}
+        centeredTitle={refAdeme}
+        logoutHref={(() => {
+          const domain = (import.meta.env.VITE_COGNITO_DOMAIN_URL as string | undefined)?.replace(/^https?:\/\//, "");
+          if (!domain) return undefined;
+          const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined;
+          const logoutRedirect = (import.meta.env.VITE_LOGOUT_REDIRECT_URL as string | undefined) || window.location.origin;
+          if (!clientId) return undefined;
+          return `https://${domain}/logout?client_id=${encodeURIComponent(clientId)}&logout_uri=${encodeURIComponent(logoutRedirect)}`;
+        })()}
+      />
+      {/* Invisible iframe to pull session from auth origin when on different ports */}
+      {!bridgeReady && (
+        <iframe
+          src={(() => {
+            const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+            if (configured) {
+              try {
+                const configuredUrl = new URL(configured);
+                const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+                const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+                if (!(isConfiguredLocal && !isPageLocal)) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  const base = endsWithHtml ? configured : (hasTrailingSlash ? configured.replace(/\/$/, "") + "/index.html" : configured + "/index.html");
+                  return base;
+                }
+              } catch {
+                return configured.replace(/\/$/, "") + "/index.html";
+              }
+            }
+            if (window.location.hostname === "localhost") return "http://localhost:5173/index.html";
+            return "/auth/index.html";
+          })()}
+          style={{ display: "none" }}
+          title="session-bridge"
+        />
+      )}
+      <div style={{ padding: 24 }}>
+      <Row gutter={[16, 16]}>
+        <Col xs={0} lg={4}></Col>
+        <Col xs={24} lg={16}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
+            <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
+          </div>
+          <Paragraph style={{ color: "#4b5563", marginTop: 4 }}>Provide JSON and configure options, then submit.</Paragraph>
+          
+          <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
+            <div style={{ display: "grid" }}>
+              <textarea
+                ref={textAreaRef}
+                value={jsonText}
+                onChange={(e) => { hasUserEditedRef.current = true; setJsonText(e.target.value); }}
+                placeholder="Paste or write JSON here"
+                style={{
+                  minHeight: 420,
+                  width: "100%",
+                  background: isEditorOpen ? "#f3f4f6" : "#ffffff",
+                  color: isEditorOpen ? "#6b7280" : "#111827",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: 12,
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                  resize: "vertical",
+                  cursor: isEditorOpen ? "default" : "text",
+                  overflow: "auto",
+                }}
+                readOnly={isEditorOpen}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <Collapse
+                destroyOnHidden
+                items={[
+                  {
+                    key: "options",
+                    label: "Options",
+                    children: (
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
+                          <Select
+                            value={apiDebug as number | undefined}
+                            onChange={(v) => setApiDebug(v)}
+                            allowClear
+                            placeholder="none"
+                            options={apiDebugOptions}
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
+                          <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
+                          <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
+                          <InputNumber value={numChunks} onChange={(v) => setNumChunks(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
+                          <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
+                        </div>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                <div style={{ position: "relative" }}>
+                  <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
+                  {isSaveMenuOpen && (
+                    <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsLoadSavedOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={() => { if (!isSaving) handleSaveToBackoffice(); }}>save {simulLog || "default"}</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={async () => {
+                      if (isSaving) return;
+                      const name = window.prompt("Save as name:", simulLog || "custom");
+                      if (!name) { setIsSaveMenuOpen(false); return; }
+                      try {
+                        const ref = `${refAdeme || "unknown"}-${name}`;
+                        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+                        const apiUrl = new URL("/backoffice/redis_file_manage", base);
+                        setIsSaving(true);
+                        // eslint-disable-next-line no-console
+                        console.debug("[simulation] POST redis_file_manage (save as)", { url: apiUrl.toString(), ref });
+                        const res = await authorizedFetch(apiUrl.toString(), {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Accept: "application/json, text/plain, */*",
+                            "x-authorization": "dperdition",
+                          },
+                          body: JSON.stringify({ ref, text: jsonText }),
+                        });
+                        if (!res.ok) {
+                          const txt = await res.text().catch(() => "");
+                          throw new Error(`HTTP ${res.status} ${txt}`);
+                        }
+                        message.success(`saved ${name}`);
+                      } catch {
+                        message.error("save failed");
+                      } finally {
+                        setIsSaving(false);
+                        setIsSaveMenuOpen(false);
+                      }
+                    }}>save as…</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", minHeight: 24 }}>
+                {!resultsUrl && isPolling && (
+                  <Spin size="small" />
+                )}
+                {resultsUrl && (
+                  <a href={resultsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Open simulation results <ExportOutlined />
+                  </a>
+                )}
+              </div>
+              <DpeDrawerEditor
+                open={isEditorOpen}
+                onClose={() => setIsEditorOpen(false)}
+                width="50%"
+                rootJsonText={jsonText}
+                onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+                apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+                getAccessToken={getAccessToken}
+                onLoadedFromApi={(data) => {
+                  try {
+                    const text = JSON.stringify(data, null, 2);
+                    setJsonText((prev) => (prev?.trim() ? prev : text));
+                  } catch {}
+                }}
+                onHighlightJsonPath={({ collection, itemKey, indices }) => {
+                  try {
+                    const ta = textAreaRef.current;
+                    if (!ta) return;
+                    const text = ta.value;
+                    // New highlight strategy: target the runs entry with elements_variant, then the elements_scope array
+                    const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                    const variantKeyIdx = text.indexOf('"elements_variant"');
+                    let searchFrom = 0;
+                    let entryStart = -1;
+                    let scopeArrayStart = -1;
+                    let scopeArrayEnd = -1;
+                    // Scan for the entry containing the variantPath
+                    while (true) {
+                      const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                      if (varIdx === -1) break;
+                      const quoteIdx = text.indexOf('"', varIdx + 18);
+                      const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                      const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                      if (value === variantPath) {
+                        // Backtrack to entry start '{'
+                        let i = varIdx;
+                        while (i >= 0 && text[i] !== '{') i--;
+                        entryStart = i >= 0 ? i : varIdx;
+                        // Find elements_scope within this entry
+                        const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                        if (scopeKeyIdx !== -1) {
+                          const openBracket = text.indexOf('[', scopeKeyIdx);
+                          if (openBracket !== -1) {
+                            scopeArrayStart = openBracket;
+                            // find matching closing bracket (not perfect but ok for flat arrays)
+                            const closeBracket = text.indexOf(']', openBracket);
+                            if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                          }
+                        }
+                        break;
+                      }
+                      searchFrom = varIdx + 1;
+                    }
+                    if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                    const prevSelStart = ta.selectionStart;
+                    const prevSelEnd = ta.selectionEnd;
+                    const prevScrollTop = ta.scrollTop;
+                    const prevScrollLeft = ta.scrollLeft;
+                    try {
+                      // Avoid scrolling when focusing for selection highlight
+                      (ta as any).focus({ preventScroll: true });
+                    } catch {
+                      try { ta.focus(); } catch {}
+                    }
+                    try {
+                      ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
+                    } catch {}
+                    // Immediately restore scroll so the viewport doesn't jump
+                    try {
+                      ta.scrollTop = prevScrollTop;
+                      ta.scrollLeft = prevScrollLeft;
+                    } catch {}
+                    window.setTimeout(() => {
+                      try {
+                        // Restore previous selection and scroll position without jumping
+                        (ta as any).focus({ preventScroll: true });
+                        ta.setSelectionRange(prevSelStart, prevSelEnd);
+                        ta.scrollTop = prevScrollTop;
+                        ta.scrollLeft = prevScrollLeft;
+                      } catch {}
+                    }, 600);
+                  } catch {}
+                }}
+              />
+            </div>
+            <SimulationScenariosModal
+              open={isScenariosOpen}
+              onCancel={() => setIsScenariosOpen(false)}
+              onLoad={(runs) => {
+                try {
+                  setJsonText(JSON.stringify(runs, null, 2));
+                } catch {
+                  // fallback to empty array
+                  setJsonText(JSON.stringify([], null, 2));
+                }
+                setIsScenariosOpen(false);
+              }}
+            />
+            <LoadScenarioModal
+              open={isLoadSavedOpen}
+              onCancel={() => setIsLoadSavedOpen(false)}
+              onSelect={(payload: unknown) => {
+                try {
+                  // Accept payload either as normalized object { ref_ademe, label } or string "ref:label"
+                  let ref: string | undefined;
+                  let simul: string | undefined;
+                  if (typeof payload === "string") {
+                    const colon = payload.indexOf(":");
+                    ref = colon !== -1 ? payload.slice(0, colon) : undefined;
+                    simul = colon !== -1 ? payload.slice(colon + 1) : undefined;
+                  } else if (payload && typeof payload === "object") {
+                    ref = (payload as any).ref_ademe as string | undefined;
+                    simul = (payload as any).label as string | undefined;
+                  }
+                  const url = new URL(window.location.href);
+                  if (ref) url.searchParams.set("ref_ademe", ref);
+                  if (simul) url.searchParams.set("simul", simul);
+                  window.location.href = url.toString();
+                } catch {}
+                setIsLoadSavedOpen(false);
+              }}
+              baseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+              initialRefAdeme={refAdeme}
+              getAccessToken={getAccessToken}
+            />
+          </Card>
+        </Col>
+        <Col xs={0} lg={4}></Col>
+
+      </Row>
+      </div>
+    </div>
+  );
+};
+
+
+
+```
+
+- Hidden the Ref column in the modal table.
+- Load action now updates the URL to include `?ref_ademe={ref}&simul={labelAfterColon}` and reloads the page.
+
+---
+
+**User**
+
+cool auto-fetch when opening modal
+
+---
+
+**Cursor**
+
+Done. When the modal opens and `ref_ademe` is prefilled, it auto-fetches the saved scenarios. If there’s no `ref_ademe`, it waits until you enter one and click Fetch.
+
+---
+
+**User**
+
+nope it doesnt
+
+---
+
+**Cursor**
+
+I see the modal isn't auto-fetching because the fetch effect only depended on `open`, not `refAdeme`, so it ran before `refAdeme` was set. I'll update the effect to depend on `[open, refAdeme]`, then rebuild the package.
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+    // Preset ref_ademe with current one each time the modal opens
+    setRefAdeme(initialRefAdeme || "");
+  }, [open, initialRefAdeme]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (refAdeme && refAdeme.trim()) {
+      // auto-fetch when opening with a prefilled ref_ademe
+      void fetchSaved();
+    }
+  }, [open, refAdeme]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const raw: unknown[] = Array.isArray((data as any)?.items)
+        ? ((data as any).items as unknown[])
+        : (Array.isArray(data) ? (data as unknown[]) : []);
+      const normalized: SavedScenarioItem[] = raw.map((it) => {
+        if (typeof it === "string") {
+          const colon = it.indexOf(":");
+          const ref = colon !== -1 ? it.slice(0, colon) : undefined;
+          const label = colon !== -1 ? it.slice(colon + 1) : it;
+          return { id: it, ref_ademe: ref, label } as SavedScenarioItem;
+        }
+        if (it && typeof it === "object") return it as SavedScenarioItem;
+        return { id: String(it), label: String(it) } as SavedScenarioItem;
+      });
+      setItems(normalized);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r: SavedScenarioItem) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+
+```
+
+Try again now. The modal auto-fetches once `open` is true and `ref_ademe` is non-empty, reacting to changes in either.
+
+---
+
+**User**
+
+actually can display ref_ademe in results for more exploration later
+
+---
+
+**Cursor**
+
+I'll re-add the Ref column in the modal table and rebuild the package.
+
+```typescriptreact
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, Input, Typography, Space, Select, Button, Table, Tag } from "antd";
+
+export type LoadScenarioModalProps = {
+  open: boolean;
+  onCancel: () => void;
+  onSelect: (payload: unknown) => void;
+  /**
+   * Used to build the API URL. Defaults to https://api-dev.etiquettedpe.fr
+   */
+  baseUrl?: string;
+  /** If provided, prefill ref_ademe */
+  initialRefAdeme?: string;
+  /** Provide a function that returns a Cognito access token string */
+  getAccessToken: () => Promise<string | null>;
+};
+
+type SavedScenarioItem = {
+  id?: string | number;
+  created_at?: string;
+  label?: string;
+  ref_ademe?: string;
+  // Any other fields we might receive
+  [key: string]: unknown;
+};
+
+export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCancel, onSelect, baseUrl = "https://api-dev.etiquettedpe.fr", initialRefAdeme, getAccessToken }) => {
+  const [refAdeme, setRefAdeme] = useState<string>(initialRefAdeme || "");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    setError(null);
+    // Preset ref_ademe with current one each time the modal opens
+    setRefAdeme(initialRefAdeme || "");
+  }, [open, initialRefAdeme]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (refAdeme && refAdeme.trim()) {
+      // auto-fetch when opening with a prefilled ref_ademe
+      void fetchSaved();
+    }
+  }, [open, refAdeme]);
+
+  async function fetchSaved() {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await getAccessToken();
+      const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
+      if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json, text/plain, */*",
+        },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      const data = (await res.json().catch(() => null)) as unknown;
+      const raw: unknown[] = Array.isArray((data as any)?.items)
+        ? ((data as any).items as unknown[])
+        : (Array.isArray(data) ? (data as unknown[]) : []);
+      const normalized: SavedScenarioItem[] = raw.map((it) => {
+        if (typeof it === "string") {
+          const colon = it.indexOf(":");
+          const ref = colon !== -1 ? it.slice(0, colon) : undefined;
+          const label = colon !== -1 ? it.slice(colon + 1) : it;
+          return { id: it, ref_ademe: ref, label } as SavedScenarioItem;
+        }
+        if (it && typeof it === "object") return it as SavedScenarioItem;
+        return { id: String(it), label: String(it) } as SavedScenarioItem;
+      });
+      setItems(normalized);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns = useMemo(
+    () => [
+      { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
+      { title: "Ref", dataIndex: "ref_ademe", key: "ref_ademe" },
+      { title: "Created", dataIndex: "created_at", key: "created_at" },
+      {
+        title: "",
+        key: "action",
+        render: (_: any, record: SavedScenarioItem) => (
+          <Button type="link" onClick={() => onSelect(record)}>load</Button>
+        ),
+      },
+    ],
+    [onSelect]
+  );
+
+  return (
+    <Modal
+      title="Load scenario"
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      destroyOnHidden
+   >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
+          <Input value={refAdeme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        </div>
+        {error && (
+          <div style={{ color: "#b91c1c" }}>{error}</div>
+        )}
+        {Array.isArray(items) && (
+          <Table
+            dataSource={items}
+            columns={columns as any}
+            rowKey={(r: SavedScenarioItem) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
+            pagination={false}
+            size="small"
+          />
+        )}
+      </Space>
+    </Modal>
+  );
+};
+
+
+
+```
+
+Ref column restored. Labels still show the part after “:”, and you can click “load” to set `?ref_ademe` and `?simul` in the URL and refresh.
+

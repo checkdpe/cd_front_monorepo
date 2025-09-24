@@ -5,7 +5,8 @@ import { Hub } from "aws-amplify/utils";
 import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
-import { DpeDrawerEditor } from "@acme/dpe-editor";
+import { LoadScenarioModal } from "@acme/load-scenario";
+import { DpeDrawerEditor, fetchSimulationTemplateJson } from "@acme/dpe-editor";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 import { flushSync } from "react-dom";
@@ -34,8 +35,10 @@ export const App: React.FC = () => {
   const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [isScenariosOpen, setIsScenariosOpen] = useState<boolean>(false);
+  const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
   function openEditor() { setIsEditorOpen(true); }
+  const hasLoadedTemplateRef = useRef<boolean>(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -157,6 +160,7 @@ export const App: React.FC = () => {
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
     const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (simul === "default") return;
     if (!refAdeme) return;
 
     const controller = new AbortController();
@@ -197,12 +201,69 @@ export const App: React.FC = () => {
     return () => controller.abort();
   }, [bridgeAuthenticated]);
 
+  // On init: if URL contains simul=default, call template endpoint and initialize editor JSON
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        if (cancelled) return;
+        if (hasLoadedTemplateRef.current) return;
+        const url = new URL(window.location.href);
+        const simul = url.searchParams.get("simul");
+        if (simul !== "default") return;
+        if (!refAdeme) return;
+        if (hasUserEditedRef.current) return;
+
+        const accessToken = await waitForAccessToken(15000, 250);
+        if (!accessToken) return;
+
+        const baseUrl = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const template = await fetchSimulationTemplateJson<any>({ baseUrl, ref_ademe: refAdeme, accessToken });
+        if (cancelled) return;
+
+        const sourceRuns: any[] = Array.isArray(template)
+          ? template
+          : (template && Array.isArray(template.runs) ? template.runs : []);
+
+        const transformedRuns = sourceRuns.map((run) => {
+          const forced = run?.parameters?.input_forced || {};
+          const scenarios = Array.isArray(run?.scenarios) ? run.scenarios : [];
+          const nextScenarios = scenarios.map((sc: any) => {
+            const baseInput = (sc && sc.input && typeof sc.input === "object") ? sc.input : {};
+            const mergedInput = { ...forced, ...baseInput };
+            return { ...sc, input: mergedInput };
+          });
+          const { parameters, ...rest } = run || {};
+          return { ...rest, scenarios: nextScenarios };
+        });
+
+        if (transformedRuns.length > 0) {
+          hasLoadedTemplateRef.current = true;
+          setJsonText(JSON.stringify(transformedRuns, null, 2));
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    run();
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh") { run(); }
+      } catch {}
+    });
+    return () => { try { (removeHub as any)?.(); } catch {}; cancelled = true; };
+  }, [refAdeme]);
+
   // On init: if URL contains ?ref_ademe=..., call backoffice endpoint (Bearer included when available)
   useEffect(() => {
     if (hasInitFetchedRef.current) return;
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
     const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+    if (simul === "default") return;
     if (!refAdeme) return;
 
     const controller = new AbortController();
@@ -581,13 +642,18 @@ export const App: React.FC = () => {
                   <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
                   {isSaveMenuOpen && (
                     <div style={{ position: "absolute", right: 0, top: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 260, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 10 }}>
-                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsScenariosOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { setIsLoadSavedOpen(true); setIsSaveMenuOpen(false); }}>load scenario</div>
                     <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
                     <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={() => { if (!isSaving) handleSaveToBackoffice(); }}>save {simulLog || "default"}</div>
                     <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
                     <div style={{ padding: "6px 8px", cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1, borderRadius: 6 }} onClick={async () => {
                       if (isSaving) return;
-                      const name = window.prompt("Save as name:", simulLog || "custom");
+                      const cdEnv = ((import.meta as any)?.env?.VITE_CD_ENV as string | undefined) || (import.meta.env.MODE === "development" ? "dev" : "prod");
+                      const suggested = `${cdEnv}_simul_${simulLog || "test0001"}`;
+                      const name = window.prompt(
+                        "Save as name (format: <CD_ENV>_simul_<name>, e.g., dev_simul_test0001):",
+                        suggested
+                      );
                       if (!name) { setIsSaveMenuOpen(false); return; }
                       try {
                         const ref = `${refAdeme || "unknown"}-${name}`;
@@ -610,6 +676,19 @@ export const App: React.FC = () => {
                           throw new Error(`HTTP ${res.status} ${txt}`);
                         }
                         message.success(`saved ${name}`);
+                        if (refAdeme) {
+                          const { origin, pathname } = window.location;
+                          const basePath = (() => {
+                            try {
+                              const idx = pathname.lastIndexOf("/");
+                              return idx !== -1 ? pathname.slice(0, idx + 1) : "/";
+                            } catch {
+                              return "/";
+                            }
+                          })();
+                          const targetUrl = `${origin}${basePath}index.html?ref_ademe=${encodeURIComponent(refAdeme)}&simul=${encodeURIComponent(name)}`;
+                          window.location.href = targetUrl;
+                        }
                       } catch {
                         message.error("save failed");
                       } finally {
@@ -728,6 +807,33 @@ export const App: React.FC = () => {
                 }
                 setIsScenariosOpen(false);
               }}
+            />
+            <LoadScenarioModal
+              open={isLoadSavedOpen}
+              onCancel={() => setIsLoadSavedOpen(false)}
+              onSelect={(payload: unknown) => {
+                try {
+                  // Accept payload either as normalized object { ref_ademe, label } or string "ref:label"
+                  let ref: string | undefined;
+                  let simul: string | undefined;
+                  if (typeof payload === "string") {
+                    const colon = payload.indexOf(":");
+                    ref = colon !== -1 ? payload.slice(0, colon) : undefined;
+                    simul = colon !== -1 ? payload.slice(colon + 1) : undefined;
+                  } else if (payload && typeof payload === "object") {
+                    ref = (payload as any).ref_ademe as string | undefined;
+                    simul = (payload as any).label as string | undefined;
+                  }
+                  const url = new URL(window.location.href);
+                  if (ref) url.searchParams.set("ref_ademe", ref);
+                  if (simul) url.searchParams.set("simul", simul);
+                  window.location.href = url.toString();
+                } catch {}
+                setIsLoadSavedOpen(false);
+              }}
+              baseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+              initialRefAdeme={refAdeme}
+              getAccessToken={getAccessToken}
             />
           </Card>
         </Col>

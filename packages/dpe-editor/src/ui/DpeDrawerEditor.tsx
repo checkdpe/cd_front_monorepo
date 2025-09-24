@@ -75,6 +75,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const [templateRuns, setTemplateRuns] = useState<any[]>([]);
   const [templateDerived, setTemplateDerived] = useState<Record<VariantId, { increments: number[]; priceVar: number[] }>>({});
   const [templateScenarioIds, setTemplateScenarioIds] = useState<Record<VariantId, number[]>>({});
+  const [detailsModal, setDetailsModal] = useState<{ open: boolean; title: string; data: any }>({ open: false, title: "", data: null });
 
   const variantDefs: VariantDef[] = useMemo(() => {
     const map = new Map<VariantId, VariantDef>();
@@ -277,8 +278,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       const entry = runsArr.find((r) => r && r.elements_variant === variantId);
       const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
       if (!scenarios.length) return empty;
-      const inputKey = mappingKeys[variantId]?.inputKey || getFirstScenarioInputKey(variantId) || "donnee_entree.epaisseur_isolation";
-      const costKey = mappingKeys[variantId]?.costKey || getFirstScenarioCostKey(variantId) || "donnee_entree.surface_paroi_opaque";
+      const inputKey = mappingKeys[variantId]?.inputKey || getFirstScenarioInputKeyFromRuns(runsArr, variantId) || "donnee_entree.epaisseur_isolation";
+      const costKey = mappingKeys[variantId]?.costKey || getFirstScenarioCostKeyFromRuns(runsArr, variantId) || "donnee_entree.surface_paroi_opaque";
       const increments: number[] = scenarios.map((sc) => {
         const val = sc?.input?.[inputKey]?.set;
         const num = typeof val === "number" ? val : Number(val);
@@ -375,8 +376,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
             (scenarioEnabled[v.id] || []).length,
             (templateScenarioIds[v.id] || []).length
           );
-          const configuredInputKey = mappingKeys[v.id]?.inputKey || getFirstScenarioInputKey(v.id) || "donnee_entree.epaisseur_isolation";
-          const configuredCostKey = mappingKeys[v.id]?.costKey || getFirstScenarioCostKey(v.id) || "donnee_entree.surface_paroi_opaque";
+          const configuredInputKey = mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "donnee_entree.epaisseur_isolation";
+          const configuredCostKey = mappingKeys[v.id]?.costKey || getTemplateScenarioCostKey(v.id) || getFirstScenarioCostKey(v.id) || "donnee_entree.surface_paroi_opaque";
 
           for (let idx = 0; idx < rowCount; idx += 1) {
             const enabled = Boolean(scenarioEnabled[v.id]?.[idx]);
@@ -511,6 +512,21 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     return undefined;
   }
 
+  function getTemplateScenarioInputKey(variantId: VariantId): string | undefined {
+    try {
+      const entry = (Array.isArray(templateRuns) ? templateRuns : []).find((r) => r && r.elements_variant === variantId);
+      const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+      for (const sc of scenarios) {
+        const inputObj = sc?.input || sc?.inputs || undefined;
+        if (inputObj && typeof inputObj === "object") {
+          const keys = Object.keys(inputObj);
+          if (keys.length > 0) return keys[0];
+        }
+      }
+    } catch {}
+    return undefined;
+  }
+
   function getFirstScenarioCostKey(variantId: VariantId): string | undefined {
     try {
       let parsed: any = [];
@@ -529,6 +545,52 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     return undefined;
   }
 
+  function getTemplateScenarioCostKey(variantId: VariantId): string | undefined {
+    try {
+      const entry = (Array.isArray(templateRuns) ? templateRuns : []).find((r) => r && r.elements_variant === variantId);
+      const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+      for (const sc of scenarios) {
+        const costObj = sc?.cost || undefined;
+        if (costObj && typeof costObj === "object") {
+          const keys = Object.keys(costObj);
+          if (keys.length > 0) return keys[0];
+        }
+      }
+    } catch {}
+    return undefined;
+  }
+
+  // Helpers to derive keys directly from a provided runs[] array (e.g., template)
+  function getFirstScenarioInputKeyFromRuns(runsArr: any[], variantId: VariantId): string | undefined {
+    try {
+      const entry = runsArr.find((r) => r && r.elements_variant === variantId);
+      const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+      for (const sc of scenarios) {
+        const inputObj = sc?.input || sc?.inputs || undefined;
+        if (inputObj && typeof inputObj === "object") {
+          const keys = Object.keys(inputObj);
+          if (keys.length > 0) return keys[0];
+        }
+      }
+    } catch {}
+    return undefined;
+  }
+
+  function getFirstScenarioCostKeyFromRuns(runsArr: any[], variantId: VariantId): string | undefined {
+    try {
+      const entry = runsArr.find((r) => r && r.elements_variant === variantId);
+      const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
+      for (const sc of scenarios) {
+        const costObj = sc?.cost || undefined;
+        if (costObj && typeof costObj === "object") {
+          const keys = Object.keys(costObj);
+          if (keys.length > 0) return keys[0];
+        }
+      }
+    } catch {}
+    return undefined;
+  }
+
   function deriveVariantPricing(variantId: VariantId): { increments: number[]; priceVar: number[] } {
     const empty = { increments: [] as number[], priceVar: [] as number[] };
     try {
@@ -538,8 +600,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       const entry = runs.find((r) => r && r.elements_variant === variantId);
       const scenarios: any[] = Array.isArray(entry?.scenarios) ? entry.scenarios : [];
       if (!scenarios.length) return empty;
-      const inputKey = mappingKeys[variantId]?.inputKey || getFirstScenarioInputKey(variantId) || "donnee_entree.epaisseur_isolation";
-      const costKey = mappingKeys[variantId]?.costKey || getFirstScenarioCostKey(variantId) || "donnee_entree.surface_paroi_opaque";
+      const inputKey = mappingKeys[variantId]?.inputKey || getTemplateScenarioInputKey(variantId) || getFirstScenarioInputKey(variantId) || "donnee_entree.epaisseur_isolation";
+      const costKey = mappingKeys[variantId]?.costKey || getTemplateScenarioCostKey(variantId) || getFirstScenarioCostKey(variantId) || "donnee_entree.surface_paroi_opaque";
       const increments: number[] = scenarios.map((sc) => {
         const val = sc?.input?.[inputKey]?.set;
         const num = typeof val === "number" ? val : Number(val);
@@ -658,8 +720,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
         if (targetIndex === -1) targetIndex = entry.scenarios.length;
         while (entry.scenarios.length <= targetIndex) entry.scenarios.push(null);
         const current = entry.scenarios[targetIndex];
-        const configuredInputKey = mappingKeys[variantId]?.inputKey || getFirstScenarioInputKey(variantId) || "donnee_entree.epaisseur_isolation";
-        const configuredCostKey = mappingKeys[variantId]?.costKey || getFirstScenarioCostKey(variantId) || "donnee_entree.surface_paroi_opaque";
+        const configuredInputKey = mappingKeys[variantId]?.inputKey || getTemplateScenarioInputKey(variantId) || getFirstScenarioInputKey(variantId) || "donnee_entree.epaisseur_isolation";
+        const configuredCostKey = mappingKeys[variantId]?.costKey || getTemplateScenarioCostKey(variantId) || getFirstScenarioCostKey(variantId) || "donnee_entree.surface_paroi_opaque";
         const nextSc: any = current && typeof current === "object" ? current : { id: idFromTemplate, input: {}, cost: {} };
         if (!nextSc.input || typeof nextSc.input !== "object") nextSc.input = {};
         if (!nextSc.cost || typeof nextSc.cost !== "object") nextSc.cost = {};
@@ -789,24 +851,35 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               {/* index selector removed */}
               {(availableOptions[v.id] && Array.isArray(availableOptions[v.id]) && (availableOptions[v.id] as any[]).length > 0) ? (
                 <div>
-                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Scope</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontWeight: 500 }}>Scope</div>
+                    <div style={{ color: "#9ca3af", fontSize: 12 }}>
+                      "right click" for details
+                    </div>
+                  </div>
                   <div style={{ display: "grid", gap: 6 }}>
-                    {(availableOptions[v.id] || []).map((opt, idx) => (
-                      <label
-                        key={opt.key}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          padding: "4px 6px",
-                          borderRadius: 6,
-                          background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
-                          transition: "background-color 600ms ease",
-                        }}
-                      >
-                        <Checkbox
-                          checked={opt.selected}
-                          onChange={(e) => {
+                    {(availableOptions[v.id] || []).map((opt, idx) => {
+                      const detailsData = { variant: v.id, collection: v.collection, itemKey: v.itemKey, index: idx, key: opt.key, selected: opt.selected, payload: opt.payload };
+                      return (
+                        <label
+                          key={opt.key}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setDetailsModal({ open: true, title: `${v.label} · ${opt.description}`, data: detailsData });
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "4px 6px",
+                            borderRadius: 6,
+                            background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
+                            transition: "background-color 600ms ease",
+                          }}
+                        >
+                          <Checkbox
+                            checked={opt.selected}
+                            onChange={(e) => {
                             const checked = e.target.checked;
                             // Update JSON immediately (runs array with elements_scope) and highlight
                             try {
@@ -851,11 +924,12 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               console.error("Failed to update JSON from option toggle", err);
                               message.error("Failed to update JSON");
                             }
-                          }}
-                        />
-                        <span style={{ fontSize: 12, color: "#374151" }}>{opt.description}</span>
-                      </label>
-                    ))}
+                            }}
+                          />
+                          <span style={{ fontSize: 12, color: "#374151" }}>{opt.description}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
@@ -902,17 +976,17 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Increment</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[v.id]?.incrementUnit || "cm"})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "increments", tempUnit: pricing[v.id]?.incrementUnit || "cm", tempKey: mappingKeys[v.id]?.inputKey || getFirstScenarioInputKey(v.id) || "", tempForcedInputs: forcedInputs[v.id] || "{\n}\n" })} />
+                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "increments", tempUnit: pricing[v.id]?.incrementUnit || "cm", tempKey: mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "", tempForcedInputs: forcedInputs[v.id] || "{\n}\n" })} />
                   </div>
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Price var</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[v.id]?.priceUnit || "EUR/m2"})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceVar", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
+                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceVar", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getTemplateScenarioCostKey(v.id) || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
                   </div>
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>Price fix</span>
                     <span style={{ color: "#9ca3af" }}>({pricing[v.id]?.priceUnit || "EUR/m2"})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceFix", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
+                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceFix", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getTemplateScenarioCostKey(v.id) || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
                   </div>
 
                   {(() => {
@@ -1097,8 +1171,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               onChange={(e) => setColSettings((prev) => ({ ...prev, tempKey: e.target.value }))}
               placeholder={colSettings.variant ? (
                 colSettings.field === "increments"
-                  ? (getFirstScenarioInputKey(colSettings.variant) || "donnee_entree.epaisseur_isolation")
-                  : (getFirstScenarioCostKey(colSettings.variant) || "donnee_entree.surface_paroi_opaque")
+                  ? (getTemplateScenarioInputKey(colSettings.variant) || getFirstScenarioInputKey(colSettings.variant) || "donnee_entree.epaisseur_isolation")
+                  : (getTemplateScenarioCostKey(colSettings.variant) || getFirstScenarioCostKey(colSettings.variant) || "donnee_entree.surface_paroi_opaque")
               ) : ""}
             />
           </div>
@@ -1123,6 +1197,21 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
             </div>
           ) : null}
         </Space>
+      </Modal>
+      <Modal
+        title={detailsModal.title || "Details"}
+        open={detailsModal.open}
+        onCancel={() => setDetailsModal({ open: false, title: "", data: null })}
+        footer={[
+          <Button key="close" onClick={() => setDetailsModal({ open: false, title: "", data: null })}>Close</Button>,
+        ]}
+        width={720}
+      >
+        <div style={{ maxHeight: 480, overflow: "auto" }}>
+          <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
+{detailsModal.data ? JSON.stringify(detailsModal.data, null, 2) : ""}
+          </pre>
+        </div>
       </Modal>
     </Drawer>
   );
