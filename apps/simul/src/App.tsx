@@ -837,6 +837,11 @@ export const App: React.FC = () => {
               onClose={() => setIsChainlitOpen(false)}
               title="Assistant"
               serverUrl={chainlitUrl}
+              userEnv={{
+                mail: "germain.blanchet@gmail.com",
+                button_id: "contactez_nous",
+                ref_ademe: refAdeme || "2508E0243162W",
+              }}
             />
           );
         })()}
