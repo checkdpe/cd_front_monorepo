@@ -5,7 +5,7 @@ A small React helper that composes `@chainlit/react-client` providers with the s
 ## Install
 
 ```bash
-pnpm add @acme/chainlit-client @chainlit/react-client
+pnpm add @acme/chainlit-client @chainlit/react-client recoil
 ```
 
 Peer deps: react, react-dom.
@@ -31,6 +31,12 @@ export default function Page() {
   );
 }
 ```
+
+### Notes
+
+- Set `serverUrl` to the Chainlit base URL. If Chainlit is served under a subpath, include it. For example:
+  - `https://chainlit-stg.etiquettedpe.fr/chainlit` → the client will connect to `https://chainlit-stg.etiquettedpe.fr/chainlit/ws/socket.io/...`.
+  - Local dev: `http://localhost:8000` → connects to `/ws/socket.io`.
 
 ## Reference
 

@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "@acme/chainlit": "workspace:*",
-    "@chainlit/react-client": "^0.2.4"
+    "@chainlit/react-client": "^0.2.4",
+    "recoil": "^0.7.7"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
