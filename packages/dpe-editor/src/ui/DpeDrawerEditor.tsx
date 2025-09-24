@@ -839,37 +839,36 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               </div>
               <div style={{ height: 8 }} />
               {/* index selector removed */}
-              {(availableOptions[v.id] && Array.isArray(availableOptions[v.id]) && (availableOptions[v.id] as any[]).length > 0) ? (
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <div style={{ fontWeight: 500 }}>Scope</div>
-                    <div style={{ color: "#9ca3af", fontSize: 12 }}>
-                      "right click" for details
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    {(availableOptions[v.id] || []).map((opt, idx) => {
-                      const detailsData = { variant: v.id, collection: v.collection, itemKey: v.itemKey, index: idx, key: opt.key, selected: opt.selected, payload: opt.payload };
-                      return (
-                        <label
-                          key={opt.key}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            setDetailsModal({ open: true, title: `${v.label} · ${opt.description}`, data: detailsData });
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            padding: "4px 6px",
-                            borderRadius: 6,
-                            background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
-                            transition: "background-color 600ms ease",
-                          }}
-                        >
-                          <Checkbox
-                            checked={opt.selected}
-                            onChange={(e) => {
+              {st.enabled ? (
+                <>
+                  {(availableOptions[v.id] && Array.isArray(availableOptions[v.id]) && (availableOptions[v.id] as any[]).length > 0) ? (
+                    <div>
+                      <div style={{ fontWeight: 500, marginBottom: 6 }}>Scope</div>
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {(availableOptions[v.id] || []).map((opt, idx) => {
+                          const detailsData = { variant: v.id, collection: v.collection, itemKey: v.itemKey, index: idx, key: opt.key, selected: opt.selected, payload: opt.payload };
+                          const adjIdRaw = (opt as any)?.payload?.enum_type_adjacence_id ?? (opt as any)?.payload?.donnee_entree?.enum_type_adjacence_id;
+                          const adjId = Number(adjIdRaw);
+                          const greyText = Number.isFinite(adjId) && adjId !== 1;
+                          return (
+                            <label
+                              key={opt.key}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "4px 6px",
+                                borderRadius: 6,
+                                background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
+                                transition: "background-color 600ms ease",
+                              }}
+                            >
+                              <Checkbox
+                                checked={opt.selected}
+                                onChange={(e) => {
                             const checked = e.target.checked;
                             // Update JSON immediately (runs array with elements_scope) and highlight
                             try {
@@ -915,52 +914,62 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               message.error("Failed to update JSON");
                             }
                             }}
-                          />
-                          <span style={{ fontSize: 12, color: "#374151" }}>{opt.description}</span>
-                        </label>
-                      );
-                    })}
+                              />
+                              <span style={{ fontSize: 12, color: greyText ? "#9ca3af" : "#374151" }}>{opt.description}</span>
+                              <Button
+                                size="small"
+                                type="text"
+                                aria-label="Show details"
+                                icon={<span aria-hidden="true">ℹ️</span>}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDetailsModal({ open: true, title: `${v.label} · ${opt.description}`, data: detailsData });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div style={{ height: 8 }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                    <div style={{ fontWeight: 500 }}>explode</div>
+                    <Switch
+                      checked={scopeStrategy[v.id] === "explode"}
+                      onChange={(checked) => {
+                        try {
+                          let parsed: any = [];
+                          try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                          const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                          const collectionName = v.collection;
+                          const itemKey = v.itemKey;
+                          const variantPath = v.id;
+                          let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                          if (!entry) {
+                            entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                            runs.push(entry);
+                          }
+                          entry.scope_strategy = checked ? "explode" : "all";
+                          onApply(JSON.stringify(runs, null, 2));
+                          setScopeStrategy((prev) => ({ ...prev, [v.id]: entry.scope_strategy }));
+                        } catch {
+                          message.error("Failed to update scope strategy");
+                        }
+                      }}
+                    />
                   </div>
-                </div>
-              ) : null}
-              <div style={{ height: 8 }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                <div style={{ fontWeight: 500 }}>explode</div>
-                <Switch
-                  checked={scopeStrategy[v.id] === "explode"}
-                  onChange={(checked) => {
-                    try {
-                      let parsed: any = [];
-                      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-                      const runs: any[] = Array.isArray(parsed) ? parsed : [];
-                      const collectionName = v.collection;
-                      const itemKey = v.itemKey;
-                      const variantPath = v.id;
-                      let entry = runs.find((r) => r && r.elements_variant === variantPath);
-                      if (!entry) {
-                        entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-                        runs.push(entry);
-                      }
-                      entry.scope_strategy = checked ? "explode" : "all";
-                      onApply(JSON.stringify(runs, null, 2));
-                      setScopeStrategy((prev) => ({ ...prev, [v.id]: entry.scope_strategy }));
-                    } catch {
-                      message.error("Failed to update scope strategy");
-                    }
-                  }}
-                />
-              </div>
-              <div style={{ height: 8 }} />
-              <div>
-                <div style={{ fontWeight: 500, marginBottom: 6 }}>Scenarios</div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: `80px repeat(3, minmax(72px, 1fr))`,
-                    gap: 4,
-                    alignItems: "center",
-                  }}
-                >
+                  <div style={{ height: 8 }} />
+                  <div>
+                    <div style={{ fontWeight: 500, marginBottom: 6 }}>Scenarios</div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: `80px repeat(3, minmax(72px, 1fr))`,
+                        gap: 4,
+                        alignItems: "center",
+                      }}
+                    >
                   {/* Header row: columns as Increment | Price var | Price fix */}
                   <div />
                   <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
@@ -1075,8 +1084,10 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                       );
                     });
                   })()}
-                </div>
-              </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </Card>
           );
         })}
