@@ -13,6 +13,8 @@ export type DpeDrawerEditorProps = {
   getAccessToken?: () => Promise<string | null>;
   onLoadedFromApi?: (data: unknown) => void;
   onHighlightJsonPath?: (args: { collection: string; itemKey: string; indices: number[] }) => void;
+  // When true, renders as a fixed inline panel instead of overlay drawer
+  inline?: boolean;
 };
 
 type VariantId = string; // e.g. "dpe.logement.enveloppe.mur_collection.mur"
@@ -53,7 +55,7 @@ function ensurePath(root: any, path: string[]): any {
   return cursor;
 }
 
-export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath }) => {
+export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath, inline = false }) => {
   const [availableOptions, setAvailableOptions] = useState<Record<VariantId, { key: string; description: string; selected: boolean; payload: any }[]>>({});
   const [highlighted, setHighlighted] = useState<Record<VariantId, Record<string, boolean>>>({});
   const [pricing, setPricing] = useState<Record<VariantId, { increments: number[]; priceVar: number[]; priceFix: number[]; incrementUnit: string; priceUnit: string }>>({});
@@ -789,20 +791,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
 
   // (removed immediate JSON writes; apply on OK)
 
-  return (
-    <Drawer
-      title="Edit DPE JSON"
-      placement="right"
-      open={open}
-      onClose={handleDrawerClose}
-      width={width}
-      mask={false}
-      extra={
-        <Space>
-          <Button type="primary" onClick={applyEditorChanges}>OK</Button>
-        </Space>
-      }
-    >
+  const PanelContent = (
+    <>
       <Space direction="vertical" size={16} style={{ width: "100%" }}>
         {variantDefs.map((v) => {
           const st = editorState[v.id] || { enabled: false, index: 0, text: "{\n}\n" };
@@ -1213,6 +1203,40 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           </pre>
         </div>
       </Modal>
+    </>
+  );
+
+  if (inline) {
+    if (!open) return null;
+    return (
+      <div style={{ width, height: "calc(100vh - 64px)", borderLeft: "1px solid #e5e7eb", background: "#fff", padding: 16, overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ fontWeight: 600 }}>Edit DPE JSON</div>
+          <Space>
+            <Button onClick={handleDrawerClose}>Close</Button>
+            <Button type="primary" onClick={applyEditorChanges}>OK</Button>
+          </Space>
+        </div>
+        {PanelContent}
+      </div>
+    );
+  }
+
+  return (
+    <Drawer
+      title="Edit DPE JSON"
+      placement="right"
+      open={open}
+      onClose={handleDrawerClose}
+      width={width}
+      mask={false}
+      extra={
+        <Space>
+          <Button type="primary" onClick={applyEditorChanges}>OK</Button>
+        </Space>
+      }
+    >
+      {PanelContent}
     </Drawer>
   );
 };

@@ -559,9 +559,8 @@ export const App: React.FC = () => {
         />
       )}
       <div style={{ padding: 24 }}>
-      <Row gutter={[16, 16]}>
-        <Col xs={0} lg={4}></Col>
-        <Col xs={24} lg={16}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+        <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
             <Button type="primary" size="large" onClick={openEditor}>Edit</Button>
@@ -710,90 +709,7 @@ export const App: React.FC = () => {
                   </a>
                 )}
               </div>
-              <DpeDrawerEditor
-                open={isEditorOpen}
-                onClose={() => setIsEditorOpen(false)}
-                width="50%"
-                rootJsonText={jsonText}
-                onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
-                apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
-                getAccessToken={getAccessToken}
-                onLoadedFromApi={(data) => {
-                  try {
-                    const text = JSON.stringify(data, null, 2);
-                    setJsonText((prev) => (prev?.trim() ? prev : text));
-                  } catch {}
-                }}
-                onHighlightJsonPath={({ collection, itemKey, indices }) => {
-                  try {
-                    const ta = textAreaRef.current;
-                    if (!ta) return;
-                    const text = ta.value;
-                    // New highlight strategy: target the runs entry with elements_variant, then the elements_scope array
-                    const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
-                    const variantKeyIdx = text.indexOf('"elements_variant"');
-                    let searchFrom = 0;
-                    let entryStart = -1;
-                    let scopeArrayStart = -1;
-                    let scopeArrayEnd = -1;
-                    // Scan for the entry containing the variantPath
-                    while (true) {
-                      const varIdx = text.indexOf('"elements_variant"', searchFrom);
-                      if (varIdx === -1) break;
-                      const quoteIdx = text.indexOf('"', varIdx + 18);
-                      const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
-                      const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
-                      if (value === variantPath) {
-                        // Backtrack to entry start '{'
-                        let i = varIdx;
-                        while (i >= 0 && text[i] !== '{') i--;
-                        entryStart = i >= 0 ? i : varIdx;
-                        // Find elements_scope within this entry
-                        const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
-                        if (scopeKeyIdx !== -1) {
-                          const openBracket = text.indexOf('[', scopeKeyIdx);
-                          if (openBracket !== -1) {
-                            scopeArrayStart = openBracket;
-                            // find matching closing bracket (not perfect but ok for flat arrays)
-                            const closeBracket = text.indexOf(']', openBracket);
-                            if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
-                          }
-                        }
-                        break;
-                      }
-                      searchFrom = varIdx + 1;
-                    }
-                    if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
-                    const prevSelStart = ta.selectionStart;
-                    const prevSelEnd = ta.selectionEnd;
-                    const prevScrollTop = ta.scrollTop;
-                    const prevScrollLeft = ta.scrollLeft;
-                    try {
-                      // Avoid scrolling when focusing for selection highlight
-                      (ta as any).focus({ preventScroll: true });
-                    } catch {
-                      try { ta.focus(); } catch {}
-                    }
-                    try {
-                      ta.setSelectionRange(scopeArrayStart, scopeArrayEnd);
-                    } catch {}
-                    // Immediately restore scroll so the viewport doesn't jump
-                    try {
-                      ta.scrollTop = prevScrollTop;
-                      ta.scrollLeft = prevScrollLeft;
-                    } catch {}
-                    window.setTimeout(() => {
-                      try {
-                        // Restore previous selection and scroll position without jumping
-                        (ta as any).focus({ preventScroll: true });
-                        ta.setSelectionRange(prevSelStart, prevSelEnd);
-                        ta.scrollTop = prevScrollTop;
-                        ta.scrollLeft = prevScrollLeft;
-                      } catch {}
-                    }, 600);
-                  } catch {}
-                }}
-              />
+              {/* editor inline panel is rendered on the right */}
             </div>
             <SimulationScenariosModal
               open={isScenariosOpen}
@@ -836,10 +752,75 @@ export const App: React.FC = () => {
               getAccessToken={getAccessToken}
             />
           </Card>
-        </Col>
-        <Col xs={0} lg={4}></Col>
+        </div>
 
-      </Row>
+        {isEditorOpen ? (
+          <DpeDrawerEditor
+            inline
+            open={isEditorOpen}
+            onClose={() => setIsEditorOpen(false)}
+            width={480}
+            rootJsonText={jsonText}
+            onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+            apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+            getAccessToken={getAccessToken}
+            onLoadedFromApi={(data) => {
+              try {
+                const text = JSON.stringify(data, null, 2);
+                setJsonText((prev) => (prev?.trim() ? prev : text));
+              } catch {}
+            }}
+            onHighlightJsonPath={({ collection, itemKey, indices }) => {
+              try {
+                const ta = textAreaRef.current;
+                if (!ta) return;
+                const text = ta.value;
+                const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                let searchFrom = 0;
+                let scopeArrayStart = -1;
+                let scopeArrayEnd = -1;
+                while (true) {
+                  const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                  if (varIdx === -1) break;
+                  const quoteIdx = text.indexOf('"', varIdx + 18);
+                  const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                  const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                  if (value === variantPath) {
+                    const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                    if (scopeKeyIdx !== -1) {
+                      const openBracket = text.indexOf('[', scopeKeyIdx);
+                      if (openBracket !== -1) {
+                        scopeArrayStart = openBracket;
+                        const closeBracket = text.indexOf(']', openBracket);
+                        if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                      }
+                    }
+                    break;
+                  }
+                  searchFrom = varIdx + 1;
+                }
+                if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                const prevSelStart = ta.selectionStart;
+                const prevSelEnd = ta.selectionEnd;
+                const prevScrollTop = ta.scrollTop;
+                const prevScrollLeft = ta.scrollLeft;
+                try { (ta as any).focus({ preventScroll: true }); } catch { try { ta.focus(); } catch {} }
+                try { ta.setSelectionRange(scopeArrayStart, scopeArrayEnd); } catch {}
+                try { ta.scrollTop = prevScrollTop; ta.scrollLeft = prevScrollLeft; } catch {}
+                window.setTimeout(() => {
+                  try {
+                    (ta as any).focus({ preventScroll: true });
+                    ta.setSelectionRange(prevSelStart, prevSelEnd);
+                    ta.scrollTop = prevScrollTop;
+                    ta.scrollLeft = prevScrollLeft;
+                  } catch {}
+                }, 600);
+              } catch {}
+            }}
+          />
+        ) : null}
+
+      </div>
       </div>
     </div>
   );
