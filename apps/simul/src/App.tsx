@@ -12,6 +12,7 @@ import { ChainlitChatDrawer } from "@acme/chainlit-client";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 import { flushSync } from "react-dom";
+import { SimulationDetailCard } from "@acme/simulation-detail";
 
 const { Title, Paragraph } = Typography;
 
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
   const [queueItems, setQueueItems] = useState<any[]>([]);
   const queuePollIdRef = useRef<number | null>(null);
   const [queueNowTick, setQueueNowTick] = useState<number>(0);
+  const [selectedPoint, setSelectedPoint] = useState<{ index: number; ep?: number; ges?: number; cost?: number; letter?: string } | null>(null);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
@@ -1034,7 +1036,30 @@ export const App: React.FC = () => {
                       apiBaseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
                       width={720}
                       height={300}
+                      onSelectPoint={(p) => setSelectedPoint(p)}
+                      selectedIndex={selectedPoint?.index}
+                      primaryColor="#1677ff"
+                      mapColorDpe={{
+                        A: "#189c44",
+                        B: "#4FAA05",
+                        C: "#CCD600",
+                        D: "#FFEE6C",
+                        E: "#FFC661",
+                        F: "#FF8300",
+                        G: "#FF3238",
+                      }}
                     />
+                    <div style={{ marginTop: 12 }}>
+                      <SimulationDetailCard point={selectedPoint || undefined} mapColorDpe={{
+                        A: "#189c44",
+                        B: "#4FAA05",
+                        C: "#CCD600",
+                        D: "#FFEE6C",
+                        E: "#FFC661",
+                        F: "#FF8300",
+                        G: "#FF3238",
+                      }} />
+                    </div>
                   </Card>
                 </div>
               ) : null}

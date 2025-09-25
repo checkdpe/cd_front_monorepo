@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
+import { Select, Space } from "antd";
 
 export type SimulationResultsProps = {
   dpeId: string;
@@ -10,6 +11,10 @@ export type SimulationResultsProps = {
   width?: number;
   height?: number;
   className?: string;
+  mapColorDpe?: Record<string, string>;
+  onSelectPoint?: (point: { index: number; ep?: number; ges?: number; cost?: number; letter?: string }) => void;
+  selectedIndex?: number;
+  primaryColor?: string;
 };
 
 type FetchState<T> =
@@ -24,6 +29,16 @@ type ChartPoint = {
   ges?: number;
   cost?: number;
   letter?: string;
+};
+
+const DEFAULT_MAP_COLOR_DPE: { [key: string]: string } = {
+  A: "#189c44",
+  B: "#4FAA05",
+  C: "#CCD600",
+  D: "#FFEE6C",
+  E: "#FFC661",
+  F: "#FF8300",
+  G: "#FF3238",
 };
 
 function parseSimulationGraphData(payload: unknown): ChartPoint[] | null {
@@ -61,10 +76,17 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
   width = 640,
   height = 360,
   className,
+  mapColorDpe,
+  onSelectPoint,
+  selectedIndex,
+  primaryColor = "#1677ff",
 }) => {
   const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
   const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const [xMetric, setXMetric] = useState<"index" | "cost">("index");
+  const [yMetric, setYMetric] = useState<"ep" | "ges">("ep");
+  const [localSelectedIndex, setLocalSelectedIndex] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +156,7 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
     svg.selectAll("*").remove();
 
     if (!points || points.length === 0) return;
-    const margin = { top: 20, right: 40, bottom: 30, left: 48 };
+    const margin = { top: 10, right: 20, bottom: 32, left: 48 };
     const innerWidth = Math.max(0, width - margin.left - margin.right);
     const innerHeight = Math.max(0, height - margin.top - margin.bottom);
 
@@ -142,91 +164,74 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
       .attr("viewBox", `0 0 ${width} ${height}`)
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
-    
-    const xDomain: [number, number] = [0, Math.max(0, (points.length - 1))];
-    const epMax = d3.max(points, (p) => Number(p.ep ?? 0)) ?? 0;
-    const gesMax = d3.max(points, (p) => Number(p.ges ?? 0)) ?? 0;
-    const leftMax = Math.max(epMax, gesMax, 0);
-    const costMax = d3.max(points, (p) => Number(p.cost ?? 0)) ?? 0;
+    // Build scatter source based on selected metrics
+    const data = points
+      .map((p) => ({
+        x: xMetric === "index" ? Number(p.index) : Number(p.cost),
+        y: yMetric === "ep" ? Number(p.ep) : Number(p.ges),
+        letter: (p.letter || "").toUpperCase(),
+        raw: p,
+      }))
+      .filter((d) => Number.isFinite(d.x) && Number.isFinite(d.y));
 
-    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
-    const yLeft = d3.scaleLinear().domain([0, leftMax]).nice().range([innerHeight, 0]);
-    const yRight = d3.scaleLinear().domain([0, costMax]).nice().range([innerHeight, 0]);
+    const xDomain = d3.extent(data, (d) => d.x) as [number, number];
+    const yDomain = d3.extent(data, (d) => d.y) as [number, number];
+
+    const x = d3.scaleLinear().domain(xDomain || [0, 1]).nice().range([0, innerWidth]);
+    const y = d3.scaleLinear().domain(yDomain || [0, 1]).nice().range([innerHeight, 0]);
 
     g.append("g")
       .attr("transform", `translate(0,${innerHeight})`)
-      .call(d3.axisBottom(x).ticks(Math.min(points.length, 10)).tickFormat((v) => String(v)));
-    g.append("g").call(d3.axisLeft(yLeft));
+      .call(d3.axisBottom(x).ticks(10));
+    g.append("g").call(d3.axisLeft(y));
+
+    const colorMap = { ...(mapColorDpe || {}), ...DEFAULT_MAP_COLOR_DPE } as Record<string, string>;
+
+    const pointsLayer = g.append("g")
+      .selectAll("circle.point")
+      .data(data)
+      .enter()
+      .append("circle")
+      .attr("class", "point")
+      .attr("cx", (d) => x(d.x))
+      .attr("cy", (d) => y(d.y))
+      .attr("r", 7)
+      .attr("fill", (d) => colorMap[d.letter] || "#9ca3af")
+      .attr("stroke", (d) => {
+        const idx = d.raw?.index as number;
+        const isSelected = typeof (selectedIndex ?? localSelectedIndex) === "number" && idx === (selectedIndex ?? localSelectedIndex);
+        return isSelected ? primaryColor : "#888888";
+      })
+      .attr("stroke-width", (d) => {
+        const idx = d.raw?.index as number;
+        const isSelected = typeof (selectedIndex ?? localSelectedIndex) === "number" && idx === (selectedIndex ?? localSelectedIndex);
+        return isSelected ? 3 : 1;
+      })
+      .attr("opacity", 0.95)
+      .style("pointer-events", "all")
+      .style("cursor", onSelectPoint ? "pointer" : "default")
+      .on("click", (_, d) => {
+        try {
+          setLocalSelectedIndex(d.raw?.index);
+          onSelectPoint && onSelectPoint(d.raw);
+        } catch {}
+      });
+
     g.append("g")
-      .attr("transform", `translate(${innerWidth},0)`) 
-      .call(d3.axisRight(yRight));
-
-    const epSeries = points.filter((p) => Number.isFinite(p.ep)).map((p) => ({ x: p.index, y: Number(p.ep) }));
-    const gesSeries = points.filter((p) => Number.isFinite(p.ges)).map((p) => ({ x: p.index, y: Number(p.ges) }));
-    const costSeries = points.filter((p) => Number.isFinite(p.cost)).map((p) => ({ x: p.index, y: Number(p.cost) }));
-
-    const lineLeft = d3
-      .line<{ x: number; y: number }>()
-      .x((d) => x(d.x))
-      .y((d) => yLeft(d.y));
-
-    const lineRight = d3
-      .line<{ x: number; y: number }>()
-      .x((d) => x(d.x))
-      .y((d) => yRight(d.y));
-
-    if (epSeries.length > 0) {
-      g.append("path")
-        .datum(epSeries)
-        .attr("fill", "none")
-        .attr("stroke", "#1677ff")
-        .attr("stroke-width", 2)
-        .attr("d", lineLeft);
-
-      // EP markers with letter labels
-      const epGroup = g.append("g");
-      epGroup
-        .selectAll("circle.ep")
-        .data(points.filter((p) => Number.isFinite(p.ep)))
-        .enter()
-        .append("circle")
-        .attr("class", "ep")
-        .attr("cx", (p) => x(p.index))
-        .attr("cy", (p) => yLeft(Number(p.ep)))
-        .attr("r", 3.5)
-        .attr("fill", "#1677ff");
-
-      epGroup
-        .selectAll("text.letter")
-        .data(points.filter((p) => Number.isFinite(p.ep) && p.letter))
-        .enter()
-        .append("text")
-        .attr("class", "letter")
-        .attr("x", (p) => x(p.index) + 6)
-        .attr("y", (p) => yLeft(Number(p.ep)) - 6)
-        .attr("font-size", 10)
-        .attr("fill", "#111827")
-        .text((p) => String(p.letter));
-    }
-
-    if (gesSeries.length > 0) {
-      g.append("path")
-        .datum(gesSeries)
-        .attr("fill", "none")
-        .attr("stroke", "#10b981")
-        .attr("stroke-width", 2)
-        .attr("d", lineLeft);
-    }
-
-    if (costSeries.length > 0) {
-      g.append("path")
-        .datum(costSeries)
-        .attr("fill", "none")
-        .attr("stroke", "#f59e0b")
-        .attr("stroke-width", 2)
-        .attr("d", lineRight);
-    }
-  }, [points, width, height]);
+      .selectAll("text.label")
+      .data(data.filter((d) => d.letter))
+      .enter()
+      .append("text")
+      .attr("class", "label")
+      .attr("x", (d) => x(d.x))
+      .attr("y", (d) => y(d.y))
+      .attr("text-anchor", "middle")
+      .attr("dy", "0.35em")
+      .attr("font-size", 9)
+      .attr("fill", "#444444")
+      .style("pointer-events", "none")
+      .text((d) => d.letter);
+  }, [points, width, height, xMetric, yMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex]);
 
   if (state.status === "loading") {
     return <div className={className}>Loading simulation results…</div>;
@@ -246,7 +251,39 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
     );
   }
 
-  return <svg ref={svgRef} className={className} width={width} height={height} />;
+  return (
+    <div className={className}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+        <Space size={8}>
+          <span style={{ color: "#4b5563" }}>horizontal</span>
+          <Select
+            size="small"
+            value={xMetric}
+            onChange={(v) => setXMetric(v)}
+            style={{ width: 140 }}
+            options={[
+              { label: "index", value: "index" },
+              { label: "cost", value: "cost" },
+            ]}
+          />
+        </Space>
+        <Space size={8}>
+          <span style={{ color: "#4b5563" }}>vertical</span>
+          <Select
+            size="small"
+            value={yMetric}
+            onChange={(v) => setYMetric(v)}
+            style={{ width: 220 }}
+            options={[
+              { label: "ep_conso_5_usages_m2", value: "ep" },
+              { label: "emission_ges_5_usages_m2", value: "ges" },
+            ]}
+          />
+        </Space>
+      </div>
+      <svg ref={svgRef} width={width} height={height} />
+    </div>
+  );
 };
 
 

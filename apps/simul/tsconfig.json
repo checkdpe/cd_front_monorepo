@@ -8,6 +8,9 @@
       ],
       "@acme/simulation-results": [
         "../../packages/simulation-results/src/index.ts"
+      ],
+      "@acme/simulation-detail": [
+        "../../packages/simulation-detail/src/index.ts"
       ]
     },
     "types": [
