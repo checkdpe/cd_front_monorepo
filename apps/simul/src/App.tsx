@@ -659,6 +659,16 @@ export const App: React.FC = () => {
     queuePollIdRef.current = id;
   }
 
+  function handleRefreshProgress() {
+    try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
+    const raw = (import.meta as any)?.env?.VITE_POLL_QUEUE_DELAY;
+    const n = Number(raw);
+    const delayMs = Number.isFinite(n) && n > 0 ? n : 5000;
+    void fetchQueueOnce();
+    window.setTimeout(() => { void fetchQueueOnce(); }, delayMs);
+    window.setTimeout(() => { void fetchQueueOnce(); }, delayMs * 2);
+  }
+
   useEffect(() => {
     return () => {
       try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
@@ -759,13 +769,9 @@ export const App: React.FC = () => {
 
   function handleConfirmWorkers() {
     const value = Number(numWorkers || 0);
-    if (value > 10) {
-      setWorkersError("Max 10 workers");
-      setConfirmedWorkers(undefined);
-      return;
-    }
-    if (value < 1) {
-      setWorkersError("Min 1 worker");
+    const allowed = [1, 2, 3, 4, 6, 8];
+    if (!allowed.includes(value)) {
+      setWorkersError(`Invalid workers: ${value}. Allowed: ${allowed.join(", ")}`);
       setConfirmedWorkers(undefined);
       return;
     }
@@ -1022,15 +1028,9 @@ export const App: React.FC = () => {
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <InputNumber value={numWorkers} onChange={(v) => { setWorkersError(undefined); setNumWorkers(Number(v ?? 1)); }} style={{ width: 140 }} min={1} />
-                            <Button size="small" onClick={handleConfirmWorkers}>ok</Button>
-                            {typeof confirmedWorkers === "number" && (
-                              <span style={{ color: "#059669", fontSize: 12 }}>saved: {confirmedWorkers}</span>
-                            )}
+                            <InputNumber value={1} disabled style={{ width: 140 }} min={1} />
+                            <span style={{ color: "#6b7280", fontSize: 12 }}>(read-only)</span>
                           </div>
-                          {workersError && (
-                            <div style={{ marginTop: 4, color: "#ef4444", fontSize: 12 }}>{workersError}</div>
-                          )}
                         </div>
                       </Space>
                     ),
@@ -1103,6 +1103,8 @@ export const App: React.FC = () => {
                         setIsSaveMenuOpen(false);
                       }
                     }}>save as…</div>
+                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
+                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { handleRefreshProgress(); setIsSaveMenuOpen(false); }}>refresh progress</div>
                     </div>
                   )}
                 </div>
@@ -1159,7 +1161,6 @@ export const App: React.FC = () => {
                         setLastRefreshedDoneCount(currentDoneCount);
                         setResultsRefreshKey((k) => k + 1);
                       }}
-                      disabled={currentDoneCount <= lastRefreshedDoneCount}
                     >
                       refresh
                     </Button>
