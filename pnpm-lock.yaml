@@ -249,6 +249,9 @@ importers:
       '@acme/load-scenario':
         specifier: workspace:*
         version: link:../../packages/load-scenario
+      '@acme/simulation-results':
+        specifier: workspace:*
+        version: link:../../packages/simulation-results
       '@acme/simulation-scenarios':
         specifier: workspace:*
         version: link:../../packages/simulation-scenarios
@@ -439,6 +442,28 @@ importers:
       '@types/react-slick':
         specifier: ^0.23.13
         version: 0.23.13
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+
+  packages/simulation-results:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/d3':
+        specifier: ^7.4.3
+        version: 7.4.3
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      d3:
+        specifier: ^7.9.0
+        version: 7.9.0
       typescript:
         specifier: ^5.5.4
         version: 5.9.2

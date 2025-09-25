@@ -7,6 +7,7 @@ import { ExportOutlined, LeftOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { LoadScenarioModal } from "@acme/load-scenario";
 import { DpeDrawerEditor, fetchSimulationTemplateJson } from "@acme/dpe-editor";
+import { SimulationResults } from "@acme/simulation-results";
 import { ChainlitChatDrawer } from "@acme/chainlit-client";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
@@ -608,10 +609,8 @@ export const App: React.FC = () => {
         throw new Error(`HTTP ${res.status} ${txt}`);
       }
       message.success("Submitted simulation");
-      if (refAdeme) {
-        const logName = `${(simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl")}_report_o3cl`;
-        startPollingForResults(refAdeme, logName);
-      }
+      try { activePollAbortRef.current?.cancel(); } catch {}
+      setIsPolling(false);
       // If nb chunks > 1, also call append_scenarios
       if (Number(numChunks || 1) > 1) {
         const appendBody = {
@@ -998,7 +997,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", minHeight: 24 }}>
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-start", minHeight: 24 }}>
                 {!resultsUrl && isPolling && (
                   <Spin size="small" />
                 )}
@@ -1008,6 +1007,22 @@ export const App: React.FC = () => {
                   </a>
                 )}
               </div>
+              {refAdeme ? (
+                <div style={{ marginTop: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+                    <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Results preview</Title>
+                  </div>
+                  <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
+                    <SimulationResults
+                      dpeId={refAdeme}
+                      getAccessToken={async () => (await getAccessToken()) || undefined}
+                      apiBaseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+                      width={720}
+                      height={300}
+                    />
+                  </Card>
+                </div>
+              ) : null}
               {queueSegments > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>

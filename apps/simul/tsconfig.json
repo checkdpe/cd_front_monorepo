@@ -5,6 +5,9 @@
     "paths": {
       "@acme/chainlit-client": [
         "../../packages/chainlit-client/src/index.ts"
+      ],
+      "@acme/simulation-results": [
+        "../../packages/simulation-results/src/index.ts"
       ]
     },
     "types": [

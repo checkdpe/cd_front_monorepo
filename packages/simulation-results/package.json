@@ -1,0 +1,32 @@
+{
+  "name": "@acme/simulation-results",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -b && eslint .",
+    "test": "echo 'no tests'"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "antd": "^5.0.0",
+    "d3": "^7.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "antd": "^5.27.4",
+    "d3": "^7.9.0",
+    "@types/d3": "^7.4.3"
+  }
+}
+
+
