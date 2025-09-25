@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
-import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse } from "antd";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse, Tooltip } from "antd";
 import { ExportOutlined, LeftOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { LoadScenarioModal } from "@acme/load-scenario";
@@ -18,9 +18,10 @@ export const App: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
-  const [skip, setSkip] = useState<number>(0);
-  const [limit, setLimit] = useState<number>(0);
+  const [skip, setSkip] = useState<number>(1);
+  const [limit, setLimit] = useState<number>(10);
   const [numChunks, setNumChunks] = useState<number>(1);
+  useEffect(() => { setNumChunks(2); }, []);
   const [numWorkers, setNumWorkers] = useState<number>(1);
   const [confirmedWorkers, setConfirmedWorkers] = useState<number | undefined>(undefined);
   const [workersError, setWorkersError] = useState<string | undefined>(undefined);
@@ -41,8 +42,12 @@ export const App: React.FC = () => {
   const [isLoadSavedOpen, setIsLoadSavedOpen] = useState<boolean>(false);
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
   const [isChainlitOpen, setIsChainlitOpen] = useState<boolean>(false);
+  const [queueSegments, setQueueSegments] = useState<number>(0);
+  const [queueAnim, setQueueAnim] = useState<boolean>(false);
+  const [queueStartedAt, setQueueStartedAt] = useState<number | null>(null);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
+  const editorOriginalTextRef = useRef<string>("");
 
   useEffect(() => {
     let isCancelled = false;
@@ -163,6 +168,8 @@ export const App: React.FC = () => {
     if (!bridgeAuthenticated || hasInitFetchedRef.current) return;
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
+    const hasSimulParam = url.searchParams.has("simul");
+    if (!hasSimulParam) return; // do not auto-fetch when simul is not explicitly provided
     const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
     if (simul === "default") return;
     if (!refAdeme) return;
@@ -266,6 +273,8 @@ export const App: React.FC = () => {
     if (hasInitFetchedRef.current) return;
     const url = new URL(window.location.href);
     const refAdeme = url.searchParams.get("ref_ademe");
+    const hasSimulParam = url.searchParams.has("simul");
+    if (!hasSimulParam) return; // do not auto-fetch when simul is not explicitly provided
     const simul = url.searchParams.get("simul") || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
     if (simul === "default") return;
     if (!refAdeme) return;
@@ -349,6 +358,45 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  // When only ref_ademe is present and no simul param, initialize editor to [] and open load modal (after token available)
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const hasRef = Boolean(url.searchParams.get("ref_ademe"));
+        const hasSimul = url.searchParams.has("simul");
+        if (hasRef && !hasSimul) {
+          if (!hasUserEditedRef.current) setJsonText("[]");
+          const token = await waitForAccessToken(15000, 250);
+          if (cancelled) return;
+          if (token) setIsLoadSavedOpen(true);
+        }
+      } catch {}
+    };
+    run();
+    const removeHub = Hub.listen("auth", (capsule) => {
+      try {
+        const event = (capsule as any)?.payload?.event as string | undefined;
+        if (!event) return;
+        if (event === "signedIn" || event === "tokenRefresh") { run(); }
+      } catch {}
+    });
+    return () => { try { (removeHub as any)?.(); } catch {}; cancelled = true; };
+  }, [refAdeme]);
+
+  // When opening with both ref_ademe and simul, expand the editor drawer by default
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const hasRef = Boolean(url.searchParams.get("ref_ademe"));
+      const simul = url.searchParams.get("simul");
+      if (hasRef && simul && simul !== "default") {
+        setIsEditorOpen(true);
+      }
+    } catch {}
+  }, [refAdeme, simulLog]);
+
   const apiDebugOptions = useMemo(() => [
     { label: "none", value: undefined },
     { label: "1", value: 1 },
@@ -360,6 +408,35 @@ export const App: React.FC = () => {
       try { activePollAbortRef.current?.cancel(); setIsPolling(false); } catch {}
     };
   }, []);
+
+  // Capture the JSON snapshot when opening the editor to detect unconfirmed changes
+  useEffect(() => {
+    try {
+      if (isEditorOpen) {
+        editorOriginalTextRef.current = jsonText || "";
+      }
+    } catch {}
+  }, [isEditorOpen]);
+
+  const isEditorDirty = useMemo(() => {
+    if (!isEditorOpen) return false;
+    try {
+      const a = (editorOriginalTextRef.current || "").trim();
+      const b = (jsonText || "").trim();
+      if (!a && !b) return false;
+      try {
+        const ap = a ? JSON.parse(a) : null;
+        const bp = b ? JSON.parse(b) : null;
+        return JSON.stringify(ap) !== JSON.stringify(bp);
+      } catch {
+        return a !== b;
+      }
+    } catch {
+      return false;
+    }
+  }, [isEditorOpen, jsonText]);
+
+  const isSubmitBlocked = isEditorOpen && isEditorDirty;
 
   function startPollingForResults(ref: string, log: string) {
     // cancel any previous polling
@@ -460,33 +537,100 @@ export const App: React.FC = () => {
         },
       };
       setSubmitting(true);
-      try {
-        // Use plain fetch to avoid adding Authorization header
-        const res = await fetch(lambdaUrl, {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const txt = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status} ${txt}`);
-        }
-        message.success("Submitted simulation");
-        if (refAdeme) {
-          startPollingForResults(refAdeme, "dev_report_o3cl");
-        }
-      } catch (e) {
-        message.error("Failed to submit");
-      } finally {
-        setSubmitting(false);
-        // eslint-disable-next-line no-console
-        console.log("simulation payload", body);
+      // Use plain fetch to avoid adding Authorization header
+      const res = await fetch(lambdaUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
       }
+      message.success("Submitted simulation");
+      if (refAdeme) {
+        const logName = `${(simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl")}_report_o3cl`;
+        startPollingForResults(refAdeme, logName);
+      }
+      // If nb chunks > 1, also call append_scenarios
+      if (Number(numChunks || 1) > 1) {
+        const appendBody = {
+          redis_db: 1,
+          task: "tasks.ext_o3cl_managing.init_scenarios",
+          args: {
+            run_name: simulLog || "dev_report_o3cl",
+            ref_ademe: refAdeme,
+            nb_chunks: Number(numChunks || 1),
+            nb_combination: 100,
+            query,
+          },
+        } as Record<string, unknown>;
+        try {
+          const res2 = await fetch(lambdaUrl, {
+            method: "POST",
+            headers: {
+              Accept: "application/json, text/plain, */*",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(appendBody),
+          });
+          if (!res2.ok) {
+            const txt2 = await res2.text().catch(() => "");
+            throw new Error(`HTTP ${res2.status} ${txt2}`);
+          }
+          message.success(`appending scenarios across ${Number(numChunks)} chunks`);
+          // eslint-disable-next-line no-console
+          console.debug("append_scenarios payload", appendBody);
+
+          // After init succeeds, fetch queue size and show segmented progress (60s per segment)
+          try {
+            const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+            const apiUrl = new URL("/backoffice/get_redis_detail", base);
+            const simulName = simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+            apiUrl.searchParams.set("ref_ademe", String(refAdeme || ""));
+            apiUrl.searchParams.set("log", `${simulName}_o3cl_queue`);
+            const qres = await authorizedFetch(apiUrl.toString(), {
+              method: "GET",
+              headers: {
+                Accept: "application/json, text/plain, */*",
+                "x-authorization": "dperdition",
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache",
+              },
+            });
+            if (qres.ok) {
+              const qdata: any = await qres.json().catch(() => null);
+              let count = 0;
+              try {
+                if (Array.isArray(qdata?.items)) count = qdata.items.length;
+                else if (Array.isArray(qdata)) count = qdata.length;
+                else if (qdata && typeof qdata === "object") {
+                  if (Array.isArray((qdata as any).queue)) count = (qdata as any).queue.length;
+                  else if (typeof (qdata as any).count === "number") count = Number((qdata as any).count);
+                }
+              } catch {}
+              if (Number.isFinite(count) && count > 0) {
+                setQueueSegments(count);
+                setQueueAnim(false);
+                setQueueStartedAt(Date.now());
+                // trigger CSS transition in next tick
+                window.setTimeout(() => setQueueAnim(true), 50);
+              }
+            }
+          } catch {}
+        } catch (e) {
+          message.error("Failed to append scenarios");
+        }
+      }
+      // eslint-disable-next-line no-console
+      console.log("simulation payload", body);
     } catch (err) {
       message.error("Invalid JSON");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -763,7 +907,11 @@ export const App: React.FC = () => {
             </div>
             <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                <Tooltip title={isSubmitBlocked ? "confirm simulation with OK (left panel), first." : undefined}>
+                  <span style={{ display: "inline-block" }}>
+                    <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isSubmitBlocked}>submit</Button>
+                  </span>
+                </Tooltip>
                 <div style={{ position: "relative" }}>
                   <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
                   {isSaveMenuOpen && (
@@ -836,6 +984,26 @@ export const App: React.FC = () => {
                   </a>
                 )}
               </div>
+              {queueSegments > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>
+                    {Array.from({ length: queueSegments }).map((_, idx) => (
+                      <div key={idx} style={{ flex: 1, display: "flex" }}>
+                        <div
+                          style={{
+                            width: queueAnim ? "100%" : "0%",
+                            transition: "width 60s linear",
+                            background: "#93c5fd",
+                          }}
+                        />
+                        {idx < queueSegments - 1 ? (
+                          <div style={{ width: 2, background: "#ffffff" }} />
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* editor inline panel is rendered on the right */}
             </div>
             <SimulationScenariosModal

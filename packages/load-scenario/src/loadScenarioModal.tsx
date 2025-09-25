@@ -51,12 +51,15 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
       setLoading(true);
       setError(null);
       const token = await getAccessToken();
+      if (!token) {
+        throw new Error("No access token available. Please sign in.");
+      }
       const url = new URL("/backoffice/simulation_scenario_saved", baseUrl);
       if (refAdeme) url.searchParams.set("ref_ademe", refAdeme);
       const res = await fetch(url.toString(), {
         method: "GET",
         headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
           Accept: "application/json, text/plain, */*",
         },
       });
