@@ -80,6 +80,10 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const [templateScenarioIds, setTemplateScenarioIds] = useState<Record<VariantId, number[]>>({});
   const [detailsModal, setDetailsModal] = useState<{ open: boolean; title: string; data: any }>({ open: false, title: "", data: null });
   const [isTemplateOpen, setIsTemplateOpen] = useState<boolean>(false);
+  // Avoid re-fetching while open due to parent re-renders: remember last load key
+  const lastLoadedKeyRef = useRef<string | null>(null);
+  // Keep a copy of the fetched envelope to derive options when variants appear
+  const [envelopeData, setEnvelopeData] = useState<any | null>(null);
 
   const variantDefs: VariantDef[] = useMemo(() => {
     const map = new Map<VariantId, VariantDef>();
@@ -147,14 +151,25 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     setAvailableOptions((prev) => ({ ...prev }));
     setHighlighted((prev) => ({ ...prev }));
   }, [variantIds]);
-  // Fetch from API when the drawer opens if configured
+  // Fetch from API when the drawer opens if configured (once per open/ref)
   useEffect(() => {
     if (!open || !apiLoadParams || !getAccessToken) return;
+    const key = `${apiLoadParams.baseUrl || ""}|${apiLoadParams.ref_ademe}`;
+    if (lastLoadedKeyRef.current === key) return;
     let isCancelled = false;
-    (async () => {
+    let attempts = 0;
+    const maxAttempts = 40; // ~20s at 500ms
+    const tryLoad = async (): Promise<void> => {
+      if (isCancelled || lastLoadedKeyRef.current === key) return;
       try {
         const token = await getAccessToken();
-        if (!token) return;
+        if (!token) {
+          if (isCancelled) return;
+          if (attempts++ < maxAttempts) {
+            window.setTimeout(tryLoad, 500);
+          }
+          return;
+        }
         const [data, template]: any[] = await Promise.all([
           fetchSimulationDpeFullJson({
             baseUrl: apiLoadParams.baseUrl,
@@ -168,8 +183,14 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           }),
         ]);
         if (!isCancelled) {
+          lastLoadedKeyRef.current = key;
           onLoadedFromApi?.(data);
           try {
+            // Store envelope for later option derivation (after variant defs resolve)
+            try {
+              const env = (data as any)?.dpe?.logement?.enveloppe || null;
+              setEnvelopeData(env);
+            } catch {}
             // Derive current scopes from JSON if present to preselect options
             let parsed: any = [];
             try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
@@ -227,9 +248,46 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           message.error("Failed to load initial data");
         }
       }
-    })();
+    };
+    tryLoad();
     return () => { isCancelled = true; };
-  }, [open, apiLoadParams?.baseUrl, apiLoadParams?.ref_ademe, getAccessToken, onLoadedFromApi]);
+  }, [open, apiLoadParams?.baseUrl, apiLoadParams?.ref_ademe, getAccessToken]);
+
+  // Reset load guard when closing so reopening can re-fetch
+  useEffect(() => {
+    if (!open) {
+      lastLoadedKeyRef.current = null;
+    }
+  }, [open]);
+
+  // Rebuild available options whenever variants resolve and we have envelope data, also sync selected from JSON
+  useEffect(() => {
+    try {
+      if (!envelopeData) return;
+      const optionsMap: Record<VariantId, { key: string; description: string; selected: boolean; payload: any }[]> = {};
+      let parsed: any = [];
+      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+      const runs: any[] = Array.isArray(parsed) ? parsed : [];
+      for (const v of variantDefs) {
+        const entry = runs.find((r) => r && r.elements_variant === v.id);
+        const scopes: number[] = Array.isArray(entry?.elements_scope) ? (entry.elements_scope as number[]) : [];
+        const collectionObj = envelopeData?.[v.collection];
+        let items: any[] = [];
+        if (Array.isArray(collectionObj?.[v.itemKey])) {
+          items = collectionObj[v.itemKey] as any[];
+        } else if (Array.isArray(collectionObj)) {
+          items = (collectionObj as any[]).map((slot) => (slot && typeof slot === "object" ? slot[v.itemKey] : undefined)).filter(Boolean);
+        }
+        optionsMap[v.id] = (items || []).map((item: any, idx: number) => ({
+          key: String(item?.donnee_entree?.reference || idx),
+          description: String(item?.donnee_entree?.description || `${toLabel(v.itemKey)} ${idx + 1}`),
+          selected: scopes.includes(idx),
+          payload: item,
+        }));
+      }
+      setAvailableOptions(optionsMap);
+    } catch {}
+  }, [envelopeData, variantDefs]);
 
   // Keep checkbox selections in sync with current JSON (runs array) in the editor
   useEffect(() => {
@@ -825,9 +883,23 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                             setScopeStrategy((prev) => ({ ...prev, [v.id]: "all" }));
                           } else {
                             if (idxInRuns === -1) {
-                              const entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                              const entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] } as any;
+                              // Default scope to all available options for this variant when enabling
+                              try {
+                                const opts = availableOptions[v.id] || [];
+                                entry.elements_scope = opts.map((_, i) => i);
+                              } catch {}
                               runs.push(entry);
                               onApply(JSON.stringify(runs, null, 2));
+                            } else {
+                              const entry = runs[idxInRuns];
+                              if (!Array.isArray(entry.elements_scope) || entry.elements_scope.length === 0) {
+                                try {
+                                  const opts = availableOptions[v.id] || [];
+                                  entry.elements_scope = opts.map((_: any, i: number) => i);
+                                  onApply(JSON.stringify(runs, null, 2));
+                                } catch {}
+                              }
                             }
                           }
                         }

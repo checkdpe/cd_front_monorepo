@@ -416,6 +416,52 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  // If no Cognito token becomes available shortly after load, redirect to sign-in
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await waitForAccessToken(5000, 250);
+        if (cancelled) return;
+        if (token) return; // already authenticated
+        // Compute auth URL similarly to TopMenu.authHref
+        const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
+        const buildAuthBase = () => {
+          if (configured) {
+            try {
+              const configuredUrl = new URL(configured);
+              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
+              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+              if (isConfiguredLocal && !isPageLocal) {
+                // ignore local auth URL on non-localhost pages
+              } else {
+                if (!isConfiguredLocal) {
+                  const pathname = configuredUrl.pathname || "/";
+                  const endsWithHtml = /\.html$/i.test(pathname);
+                  const hasTrailingSlash = /\/$/.test(pathname);
+                  if (!endsWithHtml) {
+                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
+                    return base + "/index.html";
+                  }
+                }
+                return configured;
+              }
+            } catch {
+              return configured;
+            }
+          }
+          if (window.location.hostname === "localhost") return "http://localhost:5173";
+          return "/auth/index.html";
+        };
+        const authBase = buildAuthBase();
+        const sep = authBase.includes("?") ? "&" : "?";
+        const target = `${authBase}${sep}returnTo=${encodeURIComponent(window.location.href)}`;
+        window.location.href = target;
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Capture the JSON snapshot when opening the editor to detect unconfirmed changes
   useEffect(() => {
     try {
@@ -645,6 +691,8 @@ export const App: React.FC = () => {
       message.success("Submitted simulation");
       try { activePollAbortRef.current?.cancel(); } catch {}
       setIsPolling(false);
+      // After submit, always start polling only the queue/done endpoints
+      startQueuePolling();
       // If nb chunks > 1, also call append_scenarios
       if (Number(numChunks || 1) > 1) {
         const appendBody = {
@@ -675,9 +723,6 @@ export const App: React.FC = () => {
           message.success(`appending scenarios across ${Number(numChunks)} chunks`);
           // eslint-disable-next-line no-console
           console.debug("append_scenarios payload", appendBody);
-
-          // Start queue polling for segmented progress
-          startQueuePolling();
         } catch (e) {
           message.error("Failed to append scenarios");
         }
