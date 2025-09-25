@@ -1,5 +1,5 @@
 {
-  "name": "@acme/dpe-editor",
+  "name": "@acme/template-editor",
   "version": "0.1.0",
   "private": false,
   "type": "module",
@@ -23,9 +23,6 @@
   "devDependencies": {
     "typescript": "^5.5.4",
     "antd": "^5.27.4"
-  },
-  "dependencies": {
-    "@acme/template-editor": "workspace:*"
   }
 }
 

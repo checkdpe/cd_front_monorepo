@@ -13,6 +13,8 @@ export default defineConfig(({ command }) => ({
     alias: {
       "@acme/chainlit-client": resolve(__dirname, "../../packages/chainlit-client/src/index.ts"),
       "@acme/chainlit": resolve(__dirname, "../../packages/chainlit/src/index.ts"),
+      "@acme/dpe-editor": resolve(__dirname, "../../packages/dpe-editor/src/index.ts"),
+      "@acme/template-editor": resolve(__dirname, "../../packages/template-editor/src/index.ts"),
     },
   },
 }));

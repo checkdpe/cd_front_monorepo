@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
+import { TemplateEditorModal } from "@acme/template-editor";
 import { fetchSimulationDpeFullJson, fetchSimulationTemplateJson } from "../api";
 
 export type DpeDrawerEditorProps = {
@@ -78,6 +79,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const [templateDerived, setTemplateDerived] = useState<Record<VariantId, { increments: number[]; priceVar: number[] }>>({});
   const [templateScenarioIds, setTemplateScenarioIds] = useState<Record<VariantId, number[]>>({});
   const [detailsModal, setDetailsModal] = useState<{ open: boolean; title: string; data: any }>({ open: false, title: "", data: null });
+  const [isTemplateOpen, setIsTemplateOpen] = useState<boolean>(false);
 
   const variantDefs: VariantDef[] = useMemo(() => {
     const map = new Map<VariantId, VariantDef>();
@@ -794,6 +796,9 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const PanelContent = (
     <>
       <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button onClick={() => setIsTemplateOpen(true)}>Open template editor</Button>
+        </div>
         {variantDefs.map((v) => {
           const st = editorState[v.id] || { enabled: false, index: 0, text: "{\n}\n" };
           return (
@@ -1229,6 +1234,13 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           </Space>
         </div>
         {PanelContent}
+        <TemplateEditorModal
+          open={isTemplateOpen}
+          onCancel={() => setIsTemplateOpen(false)}
+          baseUrl={apiLoadParams?.baseUrl}
+          refAdeme={apiLoadParams?.ref_ademe}
+          getAccessToken={async () => (getAccessToken ? await getAccessToken() : null)}
+        />
       </div>
     );
   }
@@ -1248,6 +1260,13 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       }
     >
       {PanelContent}
+      <TemplateEditorModal
+        open={isTemplateOpen}
+        onCancel={() => setIsTemplateOpen(false)}
+        baseUrl={apiLoadParams?.baseUrl}
+        refAdeme={apiLoadParams?.ref_ademe}
+        getAccessToken={async () => (getAccessToken ? await getAccessToken() : null)}
+      />
     </Drawer>
   );
 };
