@@ -1,3 +1,220 @@
+# Create simulation graph with parameters
+_Exported on 25/09/2025 at 20:24:22 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+graph from "simulation-results" to call 
+simulation_graph
+following example -> so it includes ref_ademe and run_name/simul
+https://api-dev.etiquettedpe.fr/backoffice/simulation_graph?ref_ademe=2394E0980765L&simul=dev_simul_test0002
+
+---
+
+**Cursor**
+
+I'll locate the `simulation-results` component and check how it currently fetches data, then search for any existing usage of `simulation_graph` to integrate the new API call with `ref_ademe` and `simul` parameters.
+
+I'll open the relevant files to see how `SimulationResults` is used and then update the component to call `/backoffice/simulation_graph` with `ref_ademe` and `simul`.
+
+I'll add a simul prop to `SimulationResults`, switch its fetch to `/backoffice/simulation_graph` using `ref_ademe` and `simul`, then update `apps/simul/src/App.tsx` to pass the `simul` value.
+
+I'll implement the API change in `SimulationResults` and then adjust the app to pass `simul`.
+
+I'll update `packages/simulation-results/src/simulation-results/SimulationResults.tsx` to use `/backoffice/simulation_graph` with `ref_ademe` and `simul`, then modify `apps/simul/src/App.tsx` to pass the `simul` value into `SimulationResults`.
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as d3 from "d3";
+
+export type SimulationResultsProps = {
+  dpeId: string;
+  simul?: string;
+  token?: string;
+  getAccessToken?: () => Promise<string | undefined>;
+  apiBaseUrl?: string;
+  width?: number;
+  height?: number;
+  className?: string;
+};
+
+type FetchState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "success"; data: T };
+
+function inferSeries(data: unknown): Array<{ x: number; y: number }> | null {
+  if (Array.isArray(data)) {
+    if (data.length === 0) return [];
+    const first = data[0] as unknown;
+    if (typeof first === "number") {
+      return (data as number[]).map((v, idx) => ({ x: idx, y: v }));
+    }
+    if (
+      typeof first === "object" &&
+      first !== null &&
+      ("x" in (first as Record<string, unknown>) ||
+        "y" in (first as Record<string, unknown>) ||
+        "value" in (first as Record<string, unknown>) ||
+        "date" in (first as Record<string, unknown>))
+    ) {
+      return (data as Array<Record<string, unknown>>).map((d, idx) => {
+        const xRaw = (d["x"] ?? d["date"] ?? idx) as unknown;
+        const yRaw = (d["y"] ?? d["value"] ?? 0) as unknown;
+        const x = typeof xRaw === "number" ? xRaw : idx;
+        const y = typeof yRaw === "number" ? yRaw : Number(yRaw) || 0;
+        return { x, y };
+      });
+    }
+  }
+  return null;
+}
+
+export const SimulationResults: React.FC<SimulationResultsProps> = ({
+  dpeId,
+  simul,
+  token,
+  getAccessToken,
+  apiBaseUrl = "https://api-dev.etiquettedpe.fr",
+  width = 640,
+  height = 360,
+  className,
+}) => {
+  const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveToken() {
+      if (token) {
+        setResolvedToken(token);
+        return;
+      }
+      if (getAccessToken) {
+        try {
+          const t = await getAccessToken();
+          if (!cancelled) setResolvedToken(t);
+        } catch {
+          if (!cancelled) setResolvedToken(undefined);
+        }
+      }
+    }
+    resolveToken();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, getAccessToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedToken) {
+      // wait until a token is available
+      return () => {
+        cancelled = true;
+      };
+    }
+    setState({ status: "loading" });
+    const url = new URL("/backoffice/simulation_graph", apiBaseUrl);
+    url.searchParams.set("ref_ademe", dpeId);
+    if (simul) url.searchParams.set("simul", simul);
+    fetch(url.toString(), {
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${resolvedToken}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) setState({ status: "success", data: json });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setState({ status: "error", error: (err as Error).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, dpeId, simul, resolvedToken]);
+
+  const series = useMemo(() => {
+    if (state.status !== "success") return null;
+    return inferSeries(state.data);
+  }, [state]);
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+
+    if (!series) return;
+    const margin = { top: 20, right: 20, bottom: 30, left: 40 };
+    const innerWidth = Math.max(0, width - margin.left - margin.right);
+    const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    const xDomain = d3.extent(series, (d) => d.x) as [number, number];
+    const yDomain = [0, d3.max(series, (d) => d.y) ?? 0];
+
+    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
+    const y = d3.scaleLinear().domain(yDomain).nice().range([innerHeight, 0]);
+
+    const line = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => y(d.y));
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerHeight})`)
+      .call(d3.axisBottom(x));
+    g.append("g").call(d3.axisLeft(y));
+
+    g.append("path")
+      .datum(series)
+      .attr("fill", "none")
+      .attr("stroke", "#1677ff")
+      .attr("stroke-width", 2)
+      .attr("d", line);
+  }, [series, width, height]);
+
+  if (state.status === "loading") {
+    return <div className={className}>Loading simulation results…</div>;
+  }
+  if (state.status === "error") {
+    return <div className={className}>Error: {state.error}</div>;
+  }
+
+  if (state.status === "success" && !series) {
+    return (
+      <div className={className}>
+        Unsupported data format
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(state.data, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return <svg ref={svgRef} className={className} width={width} height={height} />;
+};
+
+
+
+```
+
+I'll pass the `simul` value from `apps/simul/src/App.tsx` into `SimulationResults`, then run a linter check on the two edited files and fix any issues.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
@@ -1110,4 +1327,728 @@ export const App: React.FC = () => {
   );
 };
 
+
+
+```
+
+I updated `SimulationResults` to call the new endpoint and wired the `simul` parameter from the app.
+
+- Implemented: `packages/simulation-results/src/simulation-results/SimulationResults.tsx`
+  - Added `simul?: string` prop.
+  - Switched request to `/backoffice/simulation_graph`.
+  - Sends `ref_ademe` (from `dpeId`) and optional `simul`.
+  - Kept token resolution and D3 rendering intact.
+
+- Integrated: `apps/simul/src/App.tsx`
+  - Passes `simul={simulLog}` to `SimulationResults`.
+
+All lints are clean.
+
+Done.
+
+---
+
+**User**
+
+considering that some result would be like 
+
+{
+  "data": [
+    {
+      "redis_key": "2508E0243162W:dev_simul_test0002-0_o3cl_report",
+      "id": "2508E0243162W-0",
+      ],
+      "cost": 0,
+      "result": {
+        "ep_conso_5_usages_m2": 155,
+        "emission_ges_5_usages_m2": 5,
+        "bilan_dpe_letter": "C",
+        "emission_ges_letter": "A"
+      }
+    },
+...
+
+
+
+would you offer data to be displayed on the graph : 
+cost, ep_conso_5_usages_m2, emission_ges_5_usages_m2
+and also index in the array
+while bilan_dpe_letter appears as the dot result?
+
+---
+
+**Cursor**
+
+I'll implement support in `SimulationResults` to parse the new `simulation_graph` response, plot ep/ges on the left axis, cost on a right axis, use index for x, and render the `bilan_dpe_letter` as labels on the ep markers. Then I'll run lints.
+
+I'll parse the simulation_graph response into structured points (index, ep, ges, cost, letter), then render a multi-series D3 chart with left axis for ep/ges, right axis for cost, index on x, and show the DPE letter as labels on ep markers. Now applying the edits.
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as d3 from "d3";
+
+export type SimulationResultsProps = {
+  dpeId: string;
+  simul?: string;
+  token?: string;
+  getAccessToken?: () => Promise<string | undefined>;
+  apiBaseUrl?: string;
+  width?: number;
+  height?: number;
+  className?: string;
+};
+
+type FetchState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "success"; data: T };
+
+type ChartPoint = {
+  index: number;
+  ep?: number;
+  ges?: number;
+  cost?: number;
+  letter?: string;
+};
+
+function parseSimulationGraphData(payload: unknown): ChartPoint[] | null {
+  try {
+    // Expecting { data: [ { cost, result: { ep_conso_5_usages_m2, emission_ges_5_usages_m2, bilan_dpe_letter } }, ... ] }
+    if (!payload || typeof payload !== "object") return null;
+    const root = payload as any;
+    const arr: any[] = Array.isArray(root?.data) ? root.data : (Array.isArray(root) ? root : []);
+    if (!Array.isArray(arr)) return null;
+    const points: ChartPoint[] = arr.map((item: any, idx: number) => {
+      const res = item?.result || {};
+      const ep = Number(res?.ep_conso_5_usages_m2);
+      const ges = Number(res?.emission_ges_5_usages_m2);
+      const cost = Number(item?.cost ?? res?.cost);
+      const letter = (res?.bilan_dpe_letter as string | undefined) || undefined;
+      const p: ChartPoint = { index: idx };
+      if (Number.isFinite(ep)) p.ep = ep;
+      if (Number.isFinite(ges)) p.ges = ges;
+      if (Number.isFinite(cost)) p.cost = cost;
+      if (letter && typeof letter === "string") p.letter = letter;
+      return p;
+    });
+    return points;
+  } catch {
+    return null;
+  }
+}
+
+export const SimulationResults: React.FC<SimulationResultsProps> = ({
+  dpeId,
+  simul,
+  token,
+  getAccessToken,
+  apiBaseUrl = "https://api-dev.etiquettedpe.fr",
+  width = 640,
+  height = 360,
+  className,
+}) => {
+  const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveToken() {
+      if (token) {
+        setResolvedToken(token);
+        return;
+      }
+      if (getAccessToken) {
+        try {
+          const t = await getAccessToken();
+          if (!cancelled) setResolvedToken(t);
+        } catch {
+          if (!cancelled) setResolvedToken(undefined);
+        }
+      }
+    }
+    resolveToken();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, getAccessToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedToken) {
+      // wait until a token is available
+      return () => {
+        cancelled = true;
+      };
+    }
+    setState({ status: "loading" });
+    const url = new URL("/backoffice/simulation_graph", apiBaseUrl);
+    url.searchParams.set("ref_ademe", dpeId);
+    if (simul) url.searchParams.set("simul", simul);
+    fetch(url.toString(), {
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${resolvedToken}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) setState({ status: "success", data: json });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setState({ status: "error", error: (err as Error).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, dpeId, simul, resolvedToken]);
+
+  const points = useMemo(() => {
+    if (state.status !== "success") return null;
+    return parseSimulationGraphData(state.data);
+  }, [state]);
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+
+    if (!points || points.length === 0) return;
+    const margin = { top: 20, right: 40, bottom: 30, left: 48 };
+    const innerWidth = Math.max(0, width - margin.left - margin.right);
+    const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    const xDomain: [number, number] = [0, Math.max(0, (points.length - 1))];
+    const epMax = d3.max(points, (p) => Number(p.ep ?? 0)) ?? 0;
+    const gesMax = d3.max(points, (p) => Number(p.ges ?? 0)) ?? 0;
+    const leftMax = Math.max(epMax, gesMax, 0);
+    const costMax = d3.max(points, (p) => Number(p.cost ?? 0)) ?? 0;
+
+    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
+    const yLeft = d3.scaleLinear().domain([0, leftMax]).nice().range([innerHeight, 0]);
+    const yRight = d3.scaleLinear().domain([0, costMax]).nice().range([innerHeight, 0]);
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerHeight})`)
+      .call(d3.axisBottom(x).ticks(Math.min(points.length, 10)).tickFormat((v) => String(v)));
+    g.append("g").call(d3.axisLeft(yLeft));
+    g.append("g")
+      .attr("transform", `translate(${innerWidth},0)`) 
+      .call(d3.axisRight(yRight));
+
+    const epSeries = points.filter((p) => Number.isFinite(p.ep)).map((p) => ({ x: p.index, y: Number(p.ep) }));
+    const gesSeries = points.filter((p) => Number.isFinite(p.ges)).map((p) => ({ x: p.index, y: Number(p.ges) }));
+    const costSeries = points.filter((p) => Number.isFinite(p.cost)).map((p) => ({ x: p.index, y: Number(p.cost) }));
+
+    const lineLeft = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yLeft(d.y));
+
+    const lineRight = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yRight(d.y));
+
+    if (epSeries.length > 0) {
+      g.append("path")
+        .datum(epSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#1677ff")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+
+      // EP markers with letter labels
+      const epGroup = g.append("g");
+      epGroup
+        .selectAll("circle.ep")
+        .data(points.filter((p) => Number.isFinite(p.ep)))
+        .enter()
+        .append("circle")
+        .attr("class", "ep")
+        .attr("cx", (p) => x(p.index))
+        .attr("cy", (p) => yLeft(Number(p.ep)))
+        .attr("r", 3.5)
+        .attr("fill", "#1677ff");
+
+      epGroup
+        .selectAll("text.letter")
+        .data(points.filter((p) => Number.isFinite(p.ep) && p.letter))
+        .enter()
+        .append("text")
+        .attr("class", "letter")
+        .attr("x", (p) => x(p.index) + 6)
+        .attr("y", (p) => yLeft(Number(p.ep)) - 6)
+        .attr("font-size", 10)
+        .attr("fill", "#111827")
+        .text((p) => String(p.letter));
+    }
+
+    if (gesSeries.length > 0) {
+      g.append("path")
+        .datum(gesSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#10b981")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+    }
+
+    if (costSeries.length > 0) {
+      g.append("path")
+        .datum(costSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#f59e0b")
+        .attr("stroke-width", 2)
+        .attr("d", lineRight);
+    }
+  }, [series, width, height]);
+
+  if (state.status === "loading") {
+    return <div className={className}>Loading simulation results…</div>;
+  }
+  if (state.status === "error") {
+    return <div className={className}>Error: {state.error}</div>;
+  }
+
+  if (state.status === "success" && !points) {
+    return (
+      <div className={className}>
+        Unsupported data format
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(state.data, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return <svg ref={svgRef} className={className} width={width} height={height} />;
+};
+
+
+
+```
+
+- Yes: I now parse `data[]` items and extract index, cost, ep_conso_5_usages_m2 (ep), emission_ges_5_usages_m2 (ges), and bilan_dpe_letter (letter).
+- The chart shows:
+  - x: index
+  - y-left: ep (blue), ges (green)
+  - y-right: cost (orange)
+  - ep points display `bilan_dpe_letter` as small labels next to the dots.
+
+If you want different series colors, labels on ges too, or tooltips, say the word.
+
+---
+
+**User**
+
+SimulationResults.tsx:229 Uncaught ReferenceError: series is not defined
+    at SimulationResults (SimulationResults.tsx:229:7)
+    at renderWithHooks (chunk-FDCL5M4P.js?v=a5826b93:11548:26)
+    at mountIndeterminateComponent (chunk-FDCL5M4P.js?v=a5826b93:14926:21)
+    at beginWork (chunk-FDCL5M4P.js?v=a5826b93:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-FDCL5M4P.js?v=a5826b93:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-FDCL5M4P.js?v=a5826b93:3699:24)
+    at invokeGuardedCallback (chunk-FDCL5M4P.js?v=a5826b93:3733:39)
+    at beginWork$1 (chunk-FDCL5M4P.js?v=a5826b93:19765:15)
+    at performUnitOfWork (chunk-FDCL5M4P.js?v=a5826b93:19198:20)
+    at workLoopSync (chunk-FDCL5M4P.js?v=a5826b93:19137:13)
+SimulationResults @ SimulationResults.tsx:229
+renderWithHooks @ chunk-FDCL5M4P.js?v=a5826b93:11548
+mountIndeterminateComponent @ chunk-FDCL5M4P.js?v=a5826b93:14926
+beginWork @ chunk-FDCL5M4P.js?v=a5826b93:15914
+callCallback2 @ chunk-FDCL5M4P.js?v=a5826b93:3674
+invokeGuardedCallbackDev @ chunk-FDCL5M4P.js?v=a5826b93:3699
+invokeGuardedCallback @ chunk-FDCL5M4P.js?v=a5826b93:3733
+beginWork$1 @ chunk-FDCL5M4P.js?v=a5826b93:19765
+performUnitOfWork @ chunk-FDCL5M4P.js?v=a5826b93:19198
+workLoopSync @ chunk-FDCL5M4P.js?v=a5826b93:19137
+renderRootSync @ chunk-FDCL5M4P.js?v=a5826b93:19116
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18678
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+SimulationResults.tsx:229 Uncaught ReferenceError: series is not defined
+    at SimulationResults (SimulationResults.tsx:229:7)
+    at renderWithHooks (chunk-FDCL5M4P.js?v=a5826b93:11548:26)
+    at mountIndeterminateComponent (chunk-FDCL5M4P.js?v=a5826b93:14926:21)
+    at beginWork (chunk-FDCL5M4P.js?v=a5826b93:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-FDCL5M4P.js?v=a5826b93:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-FDCL5M4P.js?v=a5826b93:3699:24)
+    at invokeGuardedCallback (chunk-FDCL5M4P.js?v=a5826b93:3733:39)
+    at beginWork$1 (chunk-FDCL5M4P.js?v=a5826b93:19765:15)
+    at performUnitOfWork (chunk-FDCL5M4P.js?v=a5826b93:19198:20)
+    at workLoopSync (chunk-FDCL5M4P.js?v=a5826b93:19137:13)
+SimulationResults @ SimulationResults.tsx:229
+renderWithHooks @ chunk-FDCL5M4P.js?v=a5826b93:11548
+mountIndeterminateComponent @ chunk-FDCL5M4P.js?v=a5826b93:14926
+beginWork @ chunk-FDCL5M4P.js?v=a5826b93:15914
+callCallback2 @ chunk-FDCL5M4P.js?v=a5826b93:3674
+invokeGuardedCallbackDev @ chunk-FDCL5M4P.js?v=a5826b93:3699
+invokeGuardedCallback @ chunk-FDCL5M4P.js?v=a5826b93:3733
+beginWork$1 @ chunk-FDCL5M4P.js?v=a5826b93:19765
+performUnitOfWork @ chunk-FDCL5M4P.js?v=a5826b93:19198
+workLoopSync @ chunk-FDCL5M4P.js?v=a5826b93:19137
+renderRootSync @ chunk-FDCL5M4P.js?v=a5826b93:19116
+recoverFromConcurrentError @ chunk-FDCL5M4P.js?v=a5826b93:18736
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18684
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+hook.js:608 The above error occurred in the <SimulationResults> component:
+
+    at SimulationResults (http://localhost:3000/@fs/Volumes/privateGg/ai-microfront-ant/packages/simulation-results/src/simulation-results/SimulationResults.tsx?t=1758824163512:45:3)
+    at div
+    at div
+    at http://localhost:3000/node_modules/.vite/deps/antd.js?v=a5826b93:48084:16
+    at div
+    at div
+    at div
+    at div
+    at http://localhost:3000/node_modules/.vite/deps/antd.js?v=a5826b93:48084:16
+    at div
+    at div
+    at div
+    at div
+    at App (http://localhost:3000/src/App.tsx?t=1758824163512:35:35)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+overrideMethod @ hook.js:608
+logCapturedError @ chunk-FDCL5M4P.js?v=a5826b93:14032
+update.callback @ chunk-FDCL5M4P.js?v=a5826b93:14052
+callCallback @ chunk-FDCL5M4P.js?v=a5826b93:11248
+commitUpdateQueue @ chunk-FDCL5M4P.js?v=a5826b93:11265
+commitLayoutEffectOnFiber @ chunk-FDCL5M4P.js?v=a5826b93:17093
+commitLayoutMountEffects_complete @ chunk-FDCL5M4P.js?v=a5826b93:17980
+commitLayoutEffects_begin @ chunk-FDCL5M4P.js?v=a5826b93:17969
+commitLayoutEffects @ chunk-FDCL5M4P.js?v=a5826b93:17920
+commitRootImpl @ chunk-FDCL5M4P.js?v=a5826b93:19353
+commitRoot @ chunk-FDCL5M4P.js?v=a5826b93:19277
+finishConcurrentRender @ chunk-FDCL5M4P.js?v=a5826b93:18760
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18718
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+chunk-FDCL5M4P.js?v=a5826b93:19413 Uncaught ReferenceError: series is not defined
+    at SimulationResults (SimulationResults.tsx:229:7)
+    at renderWithHooks (chunk-FDCL5M4P.js?v=a5826b93:11548:26)
+    at mountIndeterminateComponent (chunk-FDCL5M4P.js?v=a5826b93:14926:21)
+    at beginWork (chunk-FDCL5M4P.js?v=a5826b93:15914:22)
+    at beginWork$1 (chunk-FDCL5M4P.js?v=a5826b93:19753:22)
+    at performUnitOfWork (chunk-FDCL5M4P.js?v=a5826b93:19198:20)
+    at workLoopSync (chunk-FDCL5M4P.js?v=a5826b93:19137:13)
+    at renderRootSync (chunk-FDCL5M4P.js?v=a5826b93:19116:15)
+    at recoverFromConcurrentError (chunk-FDCL5M4P.js?v=a5826b93:18736:28)
+    at performConcurrentWorkOnRoot (chunk-FDCL5M4P.js?v=a5826b93:18684:30)
+SimulationResults @ SimulationResults.tsx:229
+renderWithHooks @ chunk-FDCL5M4P.js?v=a5826b93:11548
+mountIndeterminateComponent @ chunk-FDCL5M4P.js?v=a5826b93:14926
+beginWork @ chunk-FDCL5M4P.js?v=a5826b93:15914
+beginWork$1 @ chunk-FDCL5M4P.js?v=a5826b93:19753
+performUnitOfWork @ chunk-FDCL5M4P.js?v=a5826b93:19198
+workLoopSync @ chunk-FDCL5M4P.js?v=a5826b93:19137
+renderRootSync @ chunk-FDCL5M4P.js?v=a5826b93:19116
+recoverFromConcurrentError @ chunk-FDCL5M4P.js?v=a5826b93:18736
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18684
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+favicon.ico:1  GET http://localhost:3000/favicon.ico 404 (Not Found)
+App.tsx:325 [simulation] skipping get_redis_detail: no Cognito token available
+overrideMethod @ hook.js:608
+(anonymous) @ App.tsx:325
+await in (anonymous)
+(anonymous) @ App.tsx:333
+commitHookEffectListMount @ chunk-FDCL5M4P.js?v=a5826b93:16915
+commitPassiveMountOnFiber @ chunk-FDCL5M4P.js?v=a5826b93:18156
+commitPassiveMountEffects_complete @ chunk-FDCL5M4P.js?v=a5826b93:18129
+commitPassiveMountEffects_begin @ chunk-FDCL5M4P.js?v=a5826b93:18119
+commitPassiveMountEffects @ chunk-FDCL5M4P.js?v=a5826b93:18109
+flushPassiveEffectsImpl @ chunk-FDCL5M4P.js?v=a5826b93:19490
+flushPassiveEffects @ chunk-FDCL5M4P.js?v=a5826b93:19447
+performSyncWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18868
+flushSyncCallbacks @ chunk-FDCL5M4P.js?v=a5826b93:9119
+commitRootImpl @ chunk-FDCL5M4P.js?v=a5826b93:19432
+commitRoot @ chunk-FDCL5M4P.js?v=a5826b93:19277
+finishConcurrentRender @ chunk-FDCL5M4P.js?v=a5826b93:18805
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18718
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+
+
+---
+
+**Cursor**
+
+I see the runtime error is due to a leftover dependency referencing an old variable name. I'll update the effect dependency from series to points in `SimulationResults.tsx` and run lints.
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as d3 from "d3";
+
+export type SimulationResultsProps = {
+  dpeId: string;
+  simul?: string;
+  token?: string;
+  getAccessToken?: () => Promise<string | undefined>;
+  apiBaseUrl?: string;
+  width?: number;
+  height?: number;
+  className?: string;
+};
+
+type FetchState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "success"; data: T };
+
+type ChartPoint = {
+  index: number;
+  ep?: number;
+  ges?: number;
+  cost?: number;
+  letter?: string;
+};
+
+function parseSimulationGraphData(payload: unknown): ChartPoint[] | null {
+  try {
+    // Expecting { data: [ { cost, result: { ep_conso_5_usages_m2, emission_ges_5_usages_m2, bilan_dpe_letter } }, ... ] }
+    if (!payload || typeof payload !== "object") return null;
+    const root = payload as any;
+    const arr: any[] = Array.isArray(root?.data) ? root.data : (Array.isArray(root) ? root : []);
+    if (!Array.isArray(arr)) return null;
+    const points: ChartPoint[] = arr.map((item: any, idx: number) => {
+      const res = item?.result || {};
+      const ep = Number(res?.ep_conso_5_usages_m2);
+      const ges = Number(res?.emission_ges_5_usages_m2);
+      const cost = Number(item?.cost ?? res?.cost);
+      const letter = (res?.bilan_dpe_letter as string | undefined) || undefined;
+      const p: ChartPoint = { index: idx };
+      if (Number.isFinite(ep)) p.ep = ep;
+      if (Number.isFinite(ges)) p.ges = ges;
+      if (Number.isFinite(cost)) p.cost = cost;
+      if (letter && typeof letter === "string") p.letter = letter;
+      return p;
+    });
+    return points;
+  } catch {
+    return null;
+  }
+}
+
+export const SimulationResults: React.FC<SimulationResultsProps> = ({
+  dpeId,
+  simul,
+  token,
+  getAccessToken,
+  apiBaseUrl = "https://api-dev.etiquettedpe.fr",
+  width = 640,
+  height = 360,
+  className,
+}) => {
+  const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveToken() {
+      if (token) {
+        setResolvedToken(token);
+        return;
+      }
+      if (getAccessToken) {
+        try {
+          const t = await getAccessToken();
+          if (!cancelled) setResolvedToken(t);
+        } catch {
+          if (!cancelled) setResolvedToken(undefined);
+        }
+      }
+    }
+    resolveToken();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, getAccessToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedToken) {
+      // wait until a token is available
+      return () => {
+        cancelled = true;
+      };
+    }
+    setState({ status: "loading" });
+    const url = new URL("/backoffice/simulation_graph", apiBaseUrl);
+    url.searchParams.set("ref_ademe", dpeId);
+    if (simul) url.searchParams.set("simul", simul);
+    fetch(url.toString(), {
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${resolvedToken}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) setState({ status: "success", data: json });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setState({ status: "error", error: (err as Error).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, dpeId, simul, resolvedToken]);
+
+  const points = useMemo(() => {
+    if (state.status !== "success") return null;
+    return parseSimulationGraphData(state.data);
+  }, [state]);
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+
+    if (!points || points.length === 0) return;
+    const margin = { top: 20, right: 40, bottom: 30, left: 48 };
+    const innerWidth = Math.max(0, width - margin.left - margin.right);
+    const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    const xDomain: [number, number] = [0, Math.max(0, (points.length - 1))];
+    const epMax = d3.max(points, (p) => Number(p.ep ?? 0)) ?? 0;
+    const gesMax = d3.max(points, (p) => Number(p.ges ?? 0)) ?? 0;
+    const leftMax = Math.max(epMax, gesMax, 0);
+    const costMax = d3.max(points, (p) => Number(p.cost ?? 0)) ?? 0;
+
+    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
+    const yLeft = d3.scaleLinear().domain([0, leftMax]).nice().range([innerHeight, 0]);
+    const yRight = d3.scaleLinear().domain([0, costMax]).nice().range([innerHeight, 0]);
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerHeight})`)
+      .call(d3.axisBottom(x).ticks(Math.min(points.length, 10)).tickFormat((v) => String(v)));
+    g.append("g").call(d3.axisLeft(yLeft));
+    g.append("g")
+      .attr("transform", `translate(${innerWidth},0)`) 
+      .call(d3.axisRight(yRight));
+
+    const epSeries = points.filter((p) => Number.isFinite(p.ep)).map((p) => ({ x: p.index, y: Number(p.ep) }));
+    const gesSeries = points.filter((p) => Number.isFinite(p.ges)).map((p) => ({ x: p.index, y: Number(p.ges) }));
+    const costSeries = points.filter((p) => Number.isFinite(p.cost)).map((p) => ({ x: p.index, y: Number(p.cost) }));
+
+    const lineLeft = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yLeft(d.y));
+
+    const lineRight = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yRight(d.y));
+
+    if (epSeries.length > 0) {
+      g.append("path")
+        .datum(epSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#1677ff")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+
+      // EP markers with letter labels
+      const epGroup = g.append("g");
+      epGroup
+        .selectAll("circle.ep")
+        .data(points.filter((p) => Number.isFinite(p.ep)))
+        .enter()
+        .append("circle")
+        .attr("class", "ep")
+        .attr("cx", (p) => x(p.index))
+        .attr("cy", (p) => yLeft(Number(p.ep)))
+        .attr("r", 3.5)
+        .attr("fill", "#1677ff");
+
+      epGroup
+        .selectAll("text.letter")
+        .data(points.filter((p) => Number.isFinite(p.ep) && p.letter))
+        .enter()
+        .append("text")
+        .attr("class", "letter")
+        .attr("x", (p) => x(p.index) + 6)
+        .attr("y", (p) => yLeft(Number(p.ep)) - 6)
+        .attr("font-size", 10)
+        .attr("fill", "#111827")
+        .text((p) => String(p.letter));
+    }
+
+    if (gesSeries.length > 0) {
+      g.append("path")
+        .datum(gesSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#10b981")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+    }
+
+    if (costSeries.length > 0) {
+      g.append("path")
+        .datum(costSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#f59e0b")
+        .attr("stroke-width", 2)
+        .attr("d", lineRight);
+    }
+  }, [points, width, height]);
+
+  if (state.status === "loading") {
+    return <div className={className}>Loading simulation results…</div>;
+  }
+  if (state.status === "error") {
+    return <div className={className}>Error: {state.error}</div>;
+  }
+
+  if (state.status === "success" && !points) {
+    return (
+      <div className={className}>
+        Unsupported data format
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(state.data, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return <svg ref={svgRef} className={className} width={width} height={height} />;
+};
+
+
+
+```
+
+Fixed. I replaced the stale effect dependency to use points instead of series in `SimulationResults.tsx`. The runtime ReferenceError should be gone.
 
