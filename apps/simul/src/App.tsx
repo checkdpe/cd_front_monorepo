@@ -24,6 +24,8 @@ export const App: React.FC = () => {
   const [limit, setLimit] = useState<number>(10);
   const [numChunks, setNumChunks] = useState<number>(1);
   useEffect(() => { setNumChunks(2); }, []);
+  const [totalCombinations, setTotalCombinations] = useState<number | undefined>(undefined);
+  const [nbCombinations, setNbCombinations] = useState<number | undefined>(undefined);
   const [numWorkers, setNumWorkers] = useState<number>(1);
   const [confirmedWorkers, setConfirmedWorkers] = useState<number | undefined>(undefined);
   const [workersError, setWorkersError] = useState<string | undefined>(undefined);
@@ -52,6 +54,7 @@ export const App: React.FC = () => {
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
+  const combinationsAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -422,6 +425,53 @@ export const App: React.FC = () => {
     } catch {}
   }, [isEditorOpen]);
 
+  // Compute combinations count based on current JSON, ref_ademe and simul
+  useEffect(() => {
+    try { combinationsAbortRef.current?.abort(); } catch {}
+    const simulName = (simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl");
+    if (!refAdeme || !simulName) { setTotalCombinations(undefined); return; }
+    // Validate and parse JSON before calling
+    let parsedSimul: unknown = {};
+    try { parsedSimul = jsonText.trim() ? JSON.parse(jsonText) : {}; } catch { setTotalCombinations(undefined); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+        const url = new URL("/backoffice/simulation_count", base);
+        url.searchParams.set("ref_ademe", String(refAdeme));
+        url.searchParams.set("simul", String(simulName));
+        const controller = new AbortController();
+        combinationsAbortRef.current = controller;
+        const res = await authorizedFetch(url.toString(), {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "x-authorization": "dperdition",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          body: JSON.stringify({ ref_ademe: refAdeme, simul: simulName, simul_content: parsedSimul }),
+          signal: controller.signal,
+        });
+        if (!res.ok) { setTotalCombinations(undefined); return; }
+        const data: any = await res.json().catch(() => null);
+        const value = Number(((data && data.data && data.data.total_combinations) ?? (data && data.total_combinations)) as any);
+        if (Number.isFinite(value)) setTotalCombinations(value); else setTotalCombinations(undefined);
+      } catch {
+        setTotalCombinations(undefined);
+      }
+    }, 600);
+    return () => { cancelled = true; try { window.clearTimeout(timer); } catch {}; };
+  }, [refAdeme, simulLog, jsonText]);
+
+  // Initialize nbCombinations from totalCombinations once when available (unless user already set it)
+  useEffect(() => {
+    if (typeof nbCombinations === "number") return;
+    if (typeof totalCombinations === "number") setNbCombinations(totalCombinations);
+  }, [totalCombinations, nbCombinations]);
+
   // Submit is always enabled now
 
   function startPollingForResults(ref: string, log: string) {
@@ -605,7 +655,7 @@ export const App: React.FC = () => {
             ref_ademe: refAdeme,
             nb_chunks: Number(numChunks || 1),
             nb_workers: Number(numWorkers || 1),
-            nb_combination: 100,
+            nb_combinations: Number(nbCombinations || totalCombinations || 0),
             query,
           },
         } as Record<string, unknown>;
@@ -890,6 +940,14 @@ export const App: React.FC = () => {
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
                           <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>combinations</div>
+                          <InputNumber value={typeof totalCombinations === "number" ? totalCombinations : undefined} style={{ width: "100%" }} disabled min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb combinations</div>
+                          <InputNumber value={nbCombinations} onChange={(v) => setNbCombinations(Number(v ?? 0) || undefined)} style={{ width: "100%" }} min={1} />
                         </div>
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
