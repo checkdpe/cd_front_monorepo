@@ -53,6 +53,13 @@ export const App: React.FC = () => {
   const [lastRefreshedDoneCount, setLastRefreshedDoneCount] = useState<number>(0);
   const [resultsRefreshKey, setResultsRefreshKey] = useState<number>(0);
   const [selectedPoint, setSelectedPoint] = useState<{ index: number; ep?: number; ges?: number; cost?: number; letter?: string } | null>(null);
+  const [resultsXMetric, setResultsXMetric] = useState<"index" | "cost">("index");
+  const [resultsYMetric, setResultsYMetric] = useState<"ep" | "ges">("ep");
+  const isChunksTooBig = useMemo(() => {
+    if (typeof totalCombinations !== "number") return false;
+    const chunks = Math.max(1, Number(numChunks || 1));
+    return (totalCombinations / chunks) > 50;
+  }, [totalCombinations, numChunks]);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
@@ -1033,9 +1040,11 @@ export const App: React.FC = () => {
             </div>
               <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                <span style={{ display: "inline-block" }}>
-                  <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
-                </span>
+                <Tooltip title={isChunksTooBig ? "chunks too big (max.50)" : undefined}>
+                  <span style={{ display: "inline-block" }}>
+                    <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isChunksTooBig}>submit</Button>
+                  </span>
+                </Tooltip>
                 <div style={{ position: "relative" }}>
                   <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
                   {isSaveMenuOpen && (
@@ -1167,6 +1176,10 @@ export const App: React.FC = () => {
                       onSelectPoint={(p) => setSelectedPoint(p)}
                       selectedIndex={selectedPoint?.index}
                       primaryColor="#1677ff"
+                      xMetric={resultsXMetric}
+                      yMetric={resultsYMetric}
+                      onXMetricChange={setResultsXMetric}
+                      onYMetricChange={setResultsYMetric}
                       mapColorDpe={{
                         A: "#189c44",
                         B: "#4FAA05",

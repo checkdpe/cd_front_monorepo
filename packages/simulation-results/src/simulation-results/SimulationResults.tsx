@@ -15,6 +15,10 @@ export type SimulationResultsProps = {
   onSelectPoint?: (point: { index: number; ep?: number; ges?: number; cost?: number; letter?: string }) => void;
   selectedIndex?: number;
   primaryColor?: string;
+  xMetric?: "index" | "cost";
+  yMetric?: "ep" | "ges";
+  onXMetricChange?: (metric: "index" | "cost") => void;
+  onYMetricChange?: (metric: "ep" | "ges") => void;
 };
 
 type FetchState<T> =
@@ -80,12 +84,16 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
   onSelectPoint,
   selectedIndex,
   primaryColor = "#1677ff",
+  xMetric: controlledXMetric,
+  yMetric: controlledYMetric,
+  onXMetricChange,
+  onYMetricChange,
 }) => {
   const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
   const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const [xMetric, setXMetric] = useState<"index" | "cost">("index");
-  const [yMetric, setYMetric] = useState<"ep" | "ges">("ep");
+  const [localXMetric, setLocalXMetric] = useState<"index" | "cost">("index");
+  const [localYMetric, setLocalYMetric] = useState<"ep" | "ges">("ep");
   const [localSelectedIndex, setLocalSelectedIndex] = useState<number | undefined>(undefined);
 
   useEffect(() => {
@@ -165,6 +173,8 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
     // Build scatter source based on selected metrics
+    const xMetric = (controlledXMetric ?? localXMetric);
+    const yMetric = (controlledYMetric ?? localYMetric);
     const data = points
       .map((p) => ({
         x: xMetric === "index" ? Number(p.index) : Number(p.cost),
@@ -231,7 +241,7 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
       .attr("fill", "#444444")
       .style("pointer-events", "none")
       .text((d) => d.letter);
-  }, [points, width, height, xMetric, yMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex]);
+  }, [points, width, height, controlledXMetric, controlledYMetric, localXMetric, localYMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex]);
 
   if (state.status === "loading") {
     return <div className={className}>Loading simulation results…</div>;
@@ -258,8 +268,8 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
           <span style={{ color: "#4b5563" }}>horizontal</span>
           <Select
             size="small"
-            value={xMetric}
-            onChange={(v) => setXMetric(v)}
+            value={(controlledXMetric ?? localXMetric)}
+            onChange={(v) => { onXMetricChange ? onXMetricChange(v) : setLocalXMetric(v); }}
             style={{ width: 140 }}
             options={[
               { label: "index", value: "index" },
@@ -271,8 +281,8 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
           <span style={{ color: "#4b5563" }}>vertical</span>
           <Select
             size="small"
-            value={yMetric}
-            onChange={(v) => setYMetric(v)}
+            value={(controlledYMetric ?? localYMetric)}
+            onChange={(v) => { onYMetricChange ? onYMetricChange(v) : setLocalYMetric(v); }}
             style={{ width: 220 }}
             options={[
               { label: "ep_conso_5_usages_m2", value: "ep" },

@@ -105,6 +105,18 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
     [onSelect]
   );
 
+  const displayedItems = useMemo(() => {
+    if (!Array.isArray(items)) return items;
+    return items.filter((it) => {
+      try {
+        const label = String((it as any)?.label ?? "");
+        return !label.toLowerCase().includes("o3cl");
+      } catch {
+        return true;
+      }
+    });
+  }, [items]);
+
   return (
     <Modal
       title="Load scenario"
@@ -127,7 +139,7 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
         )}
         {Array.isArray(items) && (
           <Table
-            dataSource={items}
+            dataSource={displayedItems as any}
             columns={columns as any}
             rowKey={(r: SavedScenarioItem) => String(r.id ?? `${r.ref_ademe}-${r.created_at}`)}
             pagination={false}
