@@ -43,8 +43,9 @@ export const App: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
   const [isChainlitOpen, setIsChainlitOpen] = useState<boolean>(false);
   const [queueSegments, setQueueSegments] = useState<number>(0);
-  const [queueAnim, setQueueAnim] = useState<boolean>(false);
-  const [queueStartedAt, setQueueStartedAt] = useState<number | null>(null);
+  const [queueItems, setQueueItems] = useState<any[]>([]);
+  const queuePollIdRef = useRef<number | null>(null);
+  const [queueNowTick, setQueueNowTick] = useState<number>(0);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
@@ -517,6 +518,62 @@ export const App: React.FC = () => {
     }
   }
 
+  async function fetchQueueOnce() {
+    try {
+      if (!refAdeme) return;
+      const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+      const simulName = simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
+      const urlQueue = new URL("/backoffice/get_redis_detail", base);
+      urlQueue.searchParams.set("ref_ademe", String(refAdeme || ""));
+      urlQueue.searchParams.set("log", `${simulName}_o3cl_queue`);
+      const urlDone = new URL("/backoffice/get_redis_detail", base);
+      urlDone.searchParams.set("ref_ademe", String(refAdeme || ""));
+      urlDone.searchParams.set("log", `${simulName}_o3cl_done_queue`);
+
+      const [qres, dres] = await Promise.all([
+        authorizedFetch(urlQueue.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
+        authorizedFetch(urlDone.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
+      ]);
+
+      const parseItems = async (res: Response): Promise<any[]> => {
+        if (!res.ok) return [];
+        const data: any = await res.json().catch(() => null);
+        if (Array.isArray(data?.items)) return data.items as any[];
+        if (Array.isArray(data)) return data as any[];
+        if (data && typeof data === "object" && Array.isArray((data as any).queue)) return (data as any).queue as any[];
+        return [];
+      };
+
+      const [queueList, doneListRaw] = await Promise.all([parseItems(qres), parseItems(dres)]);
+      const doneList = (doneListRaw || []).map((it: any) => ({ ...it, status: 1 }));
+      const merged = [...doneList, ...queueList];
+      setQueueItems(merged);
+      setQueueSegments(merged.length || 0);
+    } catch {}
+  }
+
+  function startQueuePolling() {
+    try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
+    void fetchQueueOnce();
+    const raw = (import.meta as any)?.env?.VITE_POLL_QUEUE_DELAY;
+    const n = Number(raw);
+    const delayMs = Number.isFinite(n) && n > 0 ? n : 30000;
+    const id = window.setInterval(fetchQueueOnce, delayMs);
+    queuePollIdRef.current = id;
+  }
+
+  useEffect(() => {
+    return () => {
+      try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!queueItems.length) return;
+    const id = window.setInterval(() => setQueueNowTick((t) => t + 1), 1000);
+    return () => { try { window.clearInterval(id); } catch {} };
+  }, [queueItems.length]);
+
   async function handleSubmit() {
     try {
       const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
@@ -564,6 +621,7 @@ export const App: React.FC = () => {
             run_name: simulLog || "dev_report_o3cl",
             ref_ademe: refAdeme,
             nb_chunks: Number(numChunks || 1),
+            nb_workers: Number(numWorkers || 1),
             nb_combination: 100,
             query,
           },
@@ -585,42 +643,8 @@ export const App: React.FC = () => {
           // eslint-disable-next-line no-console
           console.debug("append_scenarios payload", appendBody);
 
-          // After init succeeds, fetch queue size and show segmented progress (60s per segment)
-          try {
-            const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
-            const apiUrl = new URL("/backoffice/get_redis_detail", base);
-            const simulName = simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl";
-            apiUrl.searchParams.set("ref_ademe", String(refAdeme || ""));
-            apiUrl.searchParams.set("log", `${simulName}_o3cl_queue`);
-            const qres = await authorizedFetch(apiUrl.toString(), {
-              method: "GET",
-              headers: {
-                Accept: "application/json, text/plain, */*",
-                "x-authorization": "dperdition",
-                "Cache-Control": "no-cache",
-                Pragma: "no-cache",
-              },
-            });
-            if (qres.ok) {
-              const qdata: any = await qres.json().catch(() => null);
-              let count = 0;
-              try {
-                if (Array.isArray(qdata?.items)) count = qdata.items.length;
-                else if (Array.isArray(qdata)) count = qdata.length;
-                else if (qdata && typeof qdata === "object") {
-                  if (Array.isArray((qdata as any).queue)) count = (qdata as any).queue.length;
-                  else if (typeof (qdata as any).count === "number") count = Number((qdata as any).count);
-                }
-              } catch {}
-              if (Number.isFinite(count) && count > 0) {
-                setQueueSegments(count);
-                setQueueAnim(false);
-                setQueueStartedAt(Date.now());
-                // trigger CSS transition in next tick
-                window.setTimeout(() => setQueueAnim(true), 50);
-              }
-            }
-          } catch {}
+          // Start queue polling for segmented progress
+          startQueuePolling();
         } catch (e) {
           message.error("Failed to append scenarios");
         }
@@ -987,20 +1011,32 @@ export const App: React.FC = () => {
               {queueSegments > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>
-                    {Array.from({ length: queueSegments }).map((_, idx) => (
-                      <div key={idx} style={{ flex: 1, display: "flex" }}>
-                        <div
-                          style={{
-                            width: queueAnim ? "100%" : "0%",
-                            transition: "width 60s linear",
-                            background: "#93c5fd",
-                          }}
-                        />
-                        {idx < queueSegments - 1 ? (
-                          <div style={{ width: 2, background: "#ffffff" }} />
-                        ) : null}
-                      </div>
-                    ))}
+                    {(queueItems.length ? queueItems : Array.from({ length: queueSegments })).map((item: any, idx: number) => {
+                      const ts = item?.ts_started;
+                      let startedAtMs = 0;
+                      try {
+                        if (typeof ts === "number") startedAtMs = ts > 1e12 ? ts : ts * 1000;
+                        else if (typeof ts === "string") {
+                          const n = Number(ts);
+                          if (Number.isFinite(n)) startedAtMs = n > 1e12 ? n : n * 1000; else {
+                            const t = Date.parse(ts);
+                            if (!Number.isNaN(t)) startedAtMs = t;
+                          }
+                        }
+                      } catch {}
+                      const elapsedSec = Math.max(0, (Date.now() - startedAtMs) / 1000);
+                      const statusNum = Number(item?.status ?? 0);
+                      const pct = statusNum === 1 ? 100 : Math.max(0, Math.min(100, (elapsedSec / 60) * 100));
+                      const fillColor = statusNum === 1 ? "#93c5fd" : "transparent";
+                      return (
+                        <div key={idx} style={{ flex: 1, display: "flex" }}>
+                          <div style={{ width: `${pct}%`, background: fillColor, transition: "width 1s linear" }} />
+                          {idx < queueSegments - 1 ? (
+                            <div style={{ width: 2, background: "#ffffff" }} />
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
