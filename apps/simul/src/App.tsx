@@ -25,7 +25,6 @@ export const App: React.FC = () => {
   const [numChunks, setNumChunks] = useState<number>(1);
   useEffect(() => { setNumChunks(2); }, []);
   const [totalCombinations, setTotalCombinations] = useState<number | undefined>(undefined);
-  const [nbCombinations, setNbCombinations] = useState<number | undefined>(undefined);
   const [numWorkers, setNumWorkers] = useState<number>(1);
   const [confirmedWorkers, setConfirmedWorkers] = useState<number | undefined>(undefined);
   const [workersError, setWorkersError] = useState<string | undefined>(undefined);
@@ -515,11 +514,7 @@ export const App: React.FC = () => {
     return () => { cancelled = true; try { window.clearTimeout(timer); } catch {}; };
   }, [refAdeme, simulLog, jsonText]);
 
-  // Initialize nbCombinations from totalCombinations once when available (unless user already set it)
-  useEffect(() => {
-    if (typeof nbCombinations === "number") return;
-    if (typeof totalCombinations === "number") setNbCombinations(totalCombinations);
-  }, [totalCombinations, nbCombinations]);
+  // (removed nbCombinations UI; we rely on dynamically computed totalCombinations)
 
   // Submit is always enabled now
 
@@ -640,19 +635,19 @@ export const App: React.FC = () => {
       setQueueSegments(merged.length || 0);
       setCurrentDoneCount(doneList.length || 0);
 
-      // Stop polling when the running queue becomes empty
-      if ((queueList?.length || 0) === 0) {
+      // Stop polling when both running and doing queues become empty
+      if ((queueList?.length || 0) === 0 && (doingList?.length || 0) === 0) {
         try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
       }
     } catch {}
   }
 
-  function startQueuePolling() {
+  function startQueuePolling(opts?: { skipImmediate?: boolean }) {
     try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
-    void fetchQueueOnce();
     const raw = (import.meta as any)?.env?.VITE_POLL_QUEUE_DELAY;
     const n = Number(raw);
     const delayMs = Number.isFinite(n) && n > 0 ? n : 5000;
+    if (!opts?.skipImmediate) { void fetchQueueOnce(); }
     const id = window.setInterval(fetchQueueOnce, delayMs);
     queuePollIdRef.current = id;
   }
@@ -685,28 +680,35 @@ export const App: React.FC = () => {
         task: "tasks.ext_o3cl_managing.direct_scenarios",
         args: {
           ref_ademe: refAdeme,
+          nb_combinations: Number(totalCombinations || 0),
           query,
         },
       };
       setSubmitting(true);
-      // Use plain fetch to avoid adding Authorization header
-      const res = await fetch(lambdaUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/json, text/plain, */*",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status} ${txt}`);
+      // Only call direct_scenarios when nb chunks <= 1
+      const shouldDirect = Number(numChunks || 1) <= 1;
+      if (shouldDirect) {
+        // Use plain fetch to avoid adding Authorization header
+        const res = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${txt}`);
+        }
+        message.success("Submitted simulation");
+        // eslint-disable-next-line no-console
+        console.log("simulation payload", body);
       }
-      message.success("Submitted simulation");
       try { activePollAbortRef.current?.cancel(); } catch {}
       setIsPolling(false);
-      // After submit, always start polling only the queue/done endpoints
-      startQueuePolling();
+      // After submit, start polling only the queue/done endpoints. Delay first hit to avoid hitting on first tick.
+      startQueuePolling({ skipImmediate: true });
       // If nb chunks > 1, also call append_scenarios
       if (Number(numChunks || 1) > 1) {
         const appendBody = {
@@ -717,7 +719,7 @@ export const App: React.FC = () => {
             ref_ademe: refAdeme,
             nb_chunks: Number(numChunks || 1),
             nb_workers: Number(numWorkers || 1),
-            nb_combinations: Number(nbCombinations || totalCombinations || 0),
+            nb_combinations: Number(totalCombinations || 0),
             query,
           },
         } as Record<string, unknown>;
@@ -741,8 +743,6 @@ export const App: React.FC = () => {
           message.error("Failed to append scenarios");
         }
       }
-      // eslint-disable-next-line no-console
-      console.log("simulation payload", body);
     } catch (err) {
       message.error("Invalid JSON");
     } finally {
@@ -978,7 +978,14 @@ export const App: React.FC = () => {
                 items={[
                   {
                     key: "options",
-                    label: "Options",
+                    label: (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span>Options</span>
+                        {typeof totalCombinations === "number" ? (
+                          <strong style={{ fontWeight: 600 }}>combinations: {totalCombinations}</strong>
+                        ) : null}
+                      </div>
+                    ),
                     children: (
                       <Space direction="vertical" size={12} style={{ width: "100%" }}>
                         <div>
@@ -1000,14 +1007,7 @@ export const App: React.FC = () => {
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
                           <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
                         </div>
-                        <div>
-                          <div style={{ marginBottom: 6, color: "#4b5563" }}>combinations</div>
-                          <InputNumber value={typeof totalCombinations === "number" ? totalCombinations : undefined} style={{ width: "100%" }} disabled min={0} />
-                        </div>
-                        <div>
-                          <div style={{ marginBottom: 6, color: "#4b5563" }}>nb combinations</div>
-                          <InputNumber value={nbCombinations} onChange={(v) => setNbCombinations(Number(v ?? 0) || undefined)} style={{ width: "100%" }} min={1} />
-                        </div>
+                        
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
                           <InputNumber value={numChunks} onChange={(v) => setNumChunks(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
