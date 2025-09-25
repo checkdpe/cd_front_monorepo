@@ -777,69 +777,71 @@ export const App: React.FC = () => {
       <div style={{ padding: 24 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
         {isEditorOpen ? (
-          <DpeDrawerEditor
-            inline
-            open={isEditorOpen}
-            onClose={() => setIsEditorOpen(false)}
-            width={480}
-            rootJsonText={jsonText}
-            onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
-            apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
-            getAccessToken={getAccessToken}
-            onLoadedFromApi={(data) => {
-              try {
-                const text = JSON.stringify(data, null, 2);
-                setJsonText((prev) => (prev?.trim() ? prev : text));
-              } catch {}
-            }}
-            onHighlightJsonPath={({ collection, itemKey, indices }) => {
-              try {
-                const ta = textAreaRef.current;
-                if (!ta) return;
-                const text = ta.value;
-                const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
-                let searchFrom = 0;
-                let scopeArrayStart = -1;
-                let scopeArrayEnd = -1;
-                while (true) {
-                  const varIdx = text.indexOf('"elements_variant"', searchFrom);
-                  if (varIdx === -1) break;
-                  const quoteIdx = text.indexOf('"', varIdx + 18);
-                  const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
-                  const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
-                  if (value === variantPath) {
-                    const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
-                    if (scopeKeyIdx !== -1) {
-                      const openBracket = text.indexOf('[', scopeKeyIdx);
-                      if (openBracket !== -1) {
-                        scopeArrayStart = openBracket;
-                        const closeBracket = text.indexOf(']', openBracket);
-                        if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+          <div style={{ position: "sticky", top: 24, alignSelf: "flex-start" }}>
+            <DpeDrawerEditor
+              inline
+              open={isEditorOpen}
+              onClose={() => setIsEditorOpen(false)}
+              width={480}
+              rootJsonText={jsonText}
+              onApply={(next) => { hasUserEditedRef.current = true; flushSync(() => setJsonText(next)); }}
+              apiLoadParams={refAdeme ? { baseUrl: (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr", ref_ademe: refAdeme } : undefined}
+              getAccessToken={getAccessToken}
+              onLoadedFromApi={(data) => {
+                try {
+                  const text = JSON.stringify(data, null, 2);
+                  setJsonText((prev) => (prev?.trim() ? prev : text));
+                } catch {}
+              }}
+              onHighlightJsonPath={({ collection, itemKey, indices }) => {
+                try {
+                  const ta = textAreaRef.current;
+                  if (!ta) return;
+                  const text = ta.value;
+                  const variantPath = `dpe.logement.enveloppe.${collection}.${itemKey}`;
+                  let searchFrom = 0;
+                  let scopeArrayStart = -1;
+                  let scopeArrayEnd = -1;
+                  while (true) {
+                    const varIdx = text.indexOf('"elements_variant"', searchFrom);
+                    if (varIdx === -1) break;
+                    const quoteIdx = text.indexOf('"', varIdx + 18);
+                    const quoteEnd = quoteIdx !== -1 ? text.indexOf('"', quoteIdx + 1) : -1;
+                    const value = quoteIdx !== -1 && quoteEnd !== -1 ? text.slice(quoteIdx + 1, quoteEnd) : '';
+                    if (value === variantPath) {
+                      const scopeKeyIdx = text.indexOf('"elements_scope"', varIdx);
+                      if (scopeKeyIdx !== -1) {
+                        const openBracket = text.indexOf('[', scopeKeyIdx);
+                        if (openBracket !== -1) {
+                          scopeArrayStart = openBracket;
+                          const closeBracket = text.indexOf(']', openBracket);
+                          if (closeBracket !== -1) scopeArrayEnd = closeBracket + 1;
+                        }
                       }
+                      break;
                     }
-                    break;
+                    searchFrom = varIdx + 1;
                   }
-                  searchFrom = varIdx + 1;
-                }
-                if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
-                const prevSelStart = ta.selectionStart;
-                const prevSelEnd = ta.selectionEnd;
-                const prevScrollTop = ta.scrollTop;
-                const prevScrollLeft = ta.scrollLeft;
-                try { (ta as any).focus({ preventScroll: true }); } catch { try { ta.focus(); } catch {} }
-                try { ta.setSelectionRange(scopeArrayStart, scopeArrayEnd); } catch {}
-                try { ta.scrollTop = prevScrollTop; ta.scrollLeft = prevScrollLeft; } catch {}
-                window.setTimeout(() => {
-                  try {
-                    (ta as any).focus({ preventScroll: true });
-                    ta.setSelectionRange(prevSelStart, prevSelEnd);
-                    ta.scrollTop = prevScrollTop;
-                    ta.scrollLeft = prevScrollLeft;
-                  } catch {}
-                }, 600);
-              } catch {}
-            }}
-          />
+                  if (scopeArrayStart === -1 || scopeArrayEnd === -1) return;
+                  const prevSelStart = ta.selectionStart;
+                  const prevSelEnd = ta.selectionEnd;
+                  const prevScrollTop = ta.scrollTop;
+                  const prevScrollLeft = ta.scrollLeft;
+                  try { (ta as any).focus({ preventScroll: true }); } catch { try { ta.focus(); } catch {} }
+                  try { ta.setSelectionRange(scopeArrayStart, scopeArrayEnd); } catch {}
+                  try { ta.scrollTop = prevScrollTop; ta.scrollLeft = prevScrollLeft; } catch {}
+                  window.setTimeout(() => {
+                    try {
+                      (ta as any).focus({ preventScroll: true });
+                      ta.setSelectionRange(prevSelStart, prevSelEnd);
+                      ta.scrollTop = prevScrollTop;
+                      ta.scrollLeft = prevScrollLeft;
+                    } catch {}
+                  }, 600);
+                } catch {}
+              }}
+            />
+          </div>
         ) : null}
 
         <div style={{ flex: 1 }}>
@@ -997,34 +999,8 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-start", minHeight: 24 }}>
-                {!resultsUrl && isPolling && (
-                  <Spin size="small" />
-                )}
-                {resultsUrl && (
-                  <a href={resultsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    Open simulation results <ExportOutlined />
-                  </a>
-                )}
-              </div>
-              {refAdeme ? (
-                <div style={{ marginTop: 20 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-                    <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Results preview</Title>
-                  </div>
-                  <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
-                    <SimulationResults
-                      dpeId={refAdeme}
-                      getAccessToken={async () => (await getAccessToken()) || undefined}
-                      apiBaseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
-                      width={720}
-                      height={300}
-                    />
-                  </Card>
-                </div>
-              ) : null}
               {queueSegments > 0 && (
-                <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 8 }}>
                   <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>
                     {(queueItems.length ? queueItems : Array.from({ length: queueSegments })).map((item: any, idx: number) => {
                       const ts = item?.ts_started;
@@ -1055,6 +1031,32 @@ export const App: React.FC = () => {
                   </div>
                 </div>
               )}
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-start", minHeight: 24 }}>
+                {!resultsUrl && isPolling && (
+                  <Spin size="small" />
+                )}
+                {resultsUrl && (
+                  <a href={resultsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Open simulation results <ExportOutlined />
+                  </a>
+                )}
+              </div>
+              {refAdeme ? (
+                <div style={{ marginTop: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+                    <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Results preview</Title>
+                  </div>
+                  <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
+                    <SimulationResults
+                      dpeId={refAdeme}
+                      getAccessToken={async () => (await getAccessToken()) || undefined}
+                      apiBaseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
+                      width={720}
+                      height={300}
+                    />
+                  </Card>
+                </div>
+              ) : null}
               {/* editor inline panel is rendered on the right */}
             </div>
             <SimulationScenariosModal
