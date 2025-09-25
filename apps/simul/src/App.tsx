@@ -420,25 +420,7 @@ export const App: React.FC = () => {
     } catch {}
   }, [isEditorOpen]);
 
-  const isEditorDirty = useMemo(() => {
-    if (!isEditorOpen) return false;
-    try {
-      const a = (editorOriginalTextRef.current || "").trim();
-      const b = (jsonText || "").trim();
-      if (!a && !b) return false;
-      try {
-        const ap = a ? JSON.parse(a) : null;
-        const bp = b ? JSON.parse(b) : null;
-        return JSON.stringify(ap) !== JSON.stringify(bp);
-      } catch {
-        return a !== b;
-      }
-    } catch {
-      return false;
-    }
-  }, [isEditorOpen, jsonText]);
-
-  const isSubmitBlocked = isEditorOpen && isEditorDirty;
+  // Submit is always enabled now
 
   function startPollingForResults(ref: string, log: string) {
     // cancel any previous polling
@@ -930,13 +912,11 @@ export const App: React.FC = () => {
                 ]}
               />
             </div>
-            <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                <Tooltip title={isSubmitBlocked ? "confirm simulation with OK (left panel), first." : undefined}>
-                  <span style={{ display: "inline-block" }}>
-                    <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isSubmitBlocked}>submit</Button>
-                  </span>
-                </Tooltip>
+                <span style={{ display: "inline-block" }}>
+                  <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                </span>
                 <div style={{ position: "relative" }}>
                   <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
                   {isSaveMenuOpen && (

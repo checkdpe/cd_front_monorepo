@@ -428,7 +428,6 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
         }
         onApply(JSON.stringify(runs, null, 2));
         message.success("Editor changes applied");
-        onClose();
         return;
       }
 
@@ -459,7 +458,6 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       }
       onApply(JSON.stringify(root, null, 2));
       message.success("Editor changes applied");
-      onClose();
     } catch (err: any) {
       message.error(String(err?.message || err || "Failed to apply changes"));
     }
@@ -970,27 +968,26 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: `80px repeat(3, minmax(72px, 1fr))`,
+                        gridTemplateColumns: `80px repeat(2, minmax(72px, 1fr))`,
                         gap: 4,
                         alignItems: "center",
                       }}
                     >
                   {/* Header row: columns as Increment | Price var | Price fix */}
                   <div />
-                  <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span>Increment</span>
-                    <span style={{ color: "#9ca3af" }}>({pricing[v.id]?.incrementUnit || "cm"})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "increments", tempUnit: pricing[v.id]?.incrementUnit || "cm", tempKey: mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "", tempForcedInputs: forcedInputs[v.id] || "{\n}\n" })} />
+                  <div style={{ color: "#4b5563", fontSize: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>Increment</span>
+                      <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "increments", tempUnit: pricing[v.id]?.incrementUnit || "cm", tempKey: mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "", tempForcedInputs: forcedInputs[v.id] || "{\n}\n" })} />
+                    </div>
+                    <div style={{ color: "#9ca3af" }}>{pricing[v.id]?.incrementUnit || "cm"}</div>
                   </div>
-                  <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span>Price var</span>
-                    <span style={{ color: "#9ca3af" }}>({pricing[v.id]?.priceUnit || "EUR/m2"})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceVar", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getTemplateScenarioCostKey(v.id) || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
-                  </div>
-                  <div style={{ color: "#4b5563", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span>Price fix</span>
-                    <span style={{ color: "#9ca3af" }}>({pricing[v.id]?.priceUnit || "EUR/m2"})</span>
-                    <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceFix", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getTemplateScenarioCostKey(v.id) || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
+                  <div style={{ color: "#4b5563", fontSize: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>Price var</span>
+                      <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "priceVar", tempUnit: pricing[v.id]?.priceUnit || "EUR/m2", tempKey: mappingKeys[v.id]?.costKey || getTemplateScenarioCostKey(v.id) || getFirstScenarioCostKey(v.id) || "", tempForcedInputs: "" })} />
+                    </div>
+                    <div style={{ color: "#9ca3af" }}>{pricing[v.id]?.priceUnit || "EUR/m2"}</div>
                   </div>
 
                   {(() => {
@@ -1064,27 +1061,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               style={{ width: "100%" }}
                             />
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6 }}>
-                            <InputNumber
-                              size="small"
-                              controls={false}
-                              min={0}
-                              value={priceFixVal}
-                              disabled={!isEnabled}
-                              onChange={(next) => {
-                                const nextVal = Number(next ?? 0);
-                                setPricing((prev) => {
-                                  const current = prev[v.id] || { increments: [], priceVar: [], priceFix: [], incrementUnit: "cm", priceUnit: "EUR/m2" };
-                                  const nextPrices = current.priceFix.slice();
-                                  const idxToSet = presentIndex !== -1 ? presentIndex : idx;
-                                  while (nextPrices.length <= idxToSet) nextPrices.push(0);
-                                  nextPrices[idxToSet] = nextVal;
-                                  return { ...prev, [v.id]: { ...current, priceFix: nextPrices } };
-                                });
-                              }}
-                              style={{ width: "100%" }}
-                            />
-                          </div>
+                          {/* Price fix column removed */}
                         </React.Fragment>
                       );
                     });
@@ -1230,7 +1207,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           <div style={{ fontWeight: 600 }}>Edit DPE JSON</div>
           <Space>
             <Button onClick={handleDrawerClose}>Close</Button>
-            <Button type="primary" onClick={applyEditorChanges}>OK</Button>
+            <Button type="primary" onClick={applyEditorChanges}>Apply</Button>
           </Space>
         </div>
         {PanelContent}
@@ -1255,7 +1232,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
       mask={false}
       extra={
         <Space>
-          <Button type="primary" onClick={applyEditorChanges}>OK</Button>
+          <Button type="primary" onClick={applyEditorChanges}>Apply</Button>
         </Space>
       }
     >
