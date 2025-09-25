@@ -50,6 +50,9 @@ export const App: React.FC = () => {
   const [queueItems, setQueueItems] = useState<any[]>([]);
   const queuePollIdRef = useRef<number | null>(null);
   const [queueNowTick, setQueueNowTick] = useState<number>(0);
+  const [currentDoneCount, setCurrentDoneCount] = useState<number>(0);
+  const [lastRefreshedDoneCount, setLastRefreshedDoneCount] = useState<number>(0);
+  const [resultsRefreshKey, setResultsRefreshKey] = useState<number>(0);
   const [selectedPoint, setSelectedPoint] = useState<{ index: number; ep?: number; ges?: number; cost?: number; letter?: string } | null>(null);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
@@ -607,12 +610,16 @@ export const App: React.FC = () => {
       const urlQueue = new URL("/backoffice/get_redis_detail", base);
       urlQueue.searchParams.set("ref_ademe", String(refAdeme || ""));
       urlQueue.searchParams.set("log", `${simulName}_o3cl_queue`);
+      const urlDoing = new URL("/backoffice/get_redis_detail", base);
+      urlDoing.searchParams.set("ref_ademe", String(refAdeme || ""));
+      urlDoing.searchParams.set("log", `${simulName}_o3cl_doing_queue`);
       const urlDone = new URL("/backoffice/get_redis_detail", base);
       urlDone.searchParams.set("ref_ademe", String(refAdeme || ""));
       urlDone.searchParams.set("log", `${simulName}_o3cl_done_queue`);
 
-      const [qres, dres] = await Promise.all([
+      const [qres, doingRes, dres] = await Promise.all([
         authorizedFetch(urlQueue.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
+        authorizedFetch(urlDoing.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
         authorizedFetch(urlDone.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
       ]);
 
@@ -625,11 +632,18 @@ export const App: React.FC = () => {
         return [];
       };
 
-      const [queueList, doneListRaw] = await Promise.all([parseItems(qres), parseItems(dres)]);
-      const doneList = (doneListRaw || []).map((it: any) => ({ ...it, status: 1 }));
-      const merged = [...doneList, ...queueList];
+      const [queueList, doingListRaw, doneListRaw] = await Promise.all([parseItems(qres), parseItems(doingRes), parseItems(dres)]);
+      const doingList = (doingListRaw || []).map((it: any) => ({ ...it, status: 1, __kind: "doing" }));
+      const doneList = (doneListRaw || []).map((it: any) => ({ ...it, status: 2, __kind: "done" }));
+      const merged = [...doneList, ...doingList, ...queueList];
       setQueueItems(merged);
       setQueueSegments(merged.length || 0);
+      setCurrentDoneCount(doneList.length || 0);
+
+      // Stop polling when the running queue becomes empty
+      if ((queueList?.length || 0) === 0) {
+        try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
+      }
     } catch {}
   }
 
@@ -638,7 +652,7 @@ export const App: React.FC = () => {
     void fetchQueueOnce();
     const raw = (import.meta as any)?.env?.VITE_POLL_QUEUE_DELAY;
     const n = Number(raw);
-    const delayMs = Number.isFinite(n) && n > 0 ? n : 30000;
+    const delayMs = Number.isFinite(n) && n > 0 ? n : 5000;
     const id = window.setInterval(fetchQueueOnce, delayMs);
     queuePollIdRef.current = id;
   }
@@ -1102,8 +1116,8 @@ export const App: React.FC = () => {
                       } catch {}
                       const elapsedSec = Math.max(0, (Date.now() - startedAtMs) / 1000);
                       const statusNum = Number(item?.status ?? 0);
-                      const pct = statusNum === 1 ? 100 : Math.max(0, Math.min(100, (elapsedSec / 60) * 100));
-                      const fillColor = statusNum === 1 ? "#93c5fd" : "transparent";
+                      const pct = statusNum >= 2 ? 100 : Math.max(0, Math.min(100, (elapsedSec / 60) * 100));
+                      const fillColor = statusNum >= 2 ? "#22c55e" : (statusNum >= 1 ? "#93c5fd" : "transparent");
                       return (
                         <div key={idx} style={{ flex: 1, display: "flex" }}>
                           <div style={{ width: `${pct}%`, background: fillColor, transition: "width 1s linear" }} />
@@ -1130,9 +1144,20 @@ export const App: React.FC = () => {
                 <div style={{ marginTop: 20 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
                     <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Results preview</Title>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setLastRefreshedDoneCount(currentDoneCount);
+                        setResultsRefreshKey((k) => k + 1);
+                      }}
+                      disabled={currentDoneCount <= lastRefreshedDoneCount}
+                    >
+                      refresh
+                    </Button>
                   </div>
                   <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
                     <SimulationResults
+                      key={resultsRefreshKey}
                       dpeId={refAdeme}
                       simul={simulLog}
                       getAccessToken={async () => (await getAccessToken()) || undefined}
