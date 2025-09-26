@@ -64,6 +64,17 @@ export const App: React.FC = () => {
     const chunks = Math.max(1, Number(numChunks || 1));
     return (totalCombinations / chunks) > 50;
   }, [totalCombinations, numChunks]);
+  const effectiveCombinations = useMemo(() => {
+    try {
+      if (overrideCombinations != null) {
+        const n = Number(overrideCombinations);
+        return Number.isFinite(n) ? n : undefined;
+      }
+      return typeof totalCombinations === "number" ? totalCombinations : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [overrideCombinations, totalCombinations]);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
@@ -1136,7 +1147,14 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              {queueSegments > 0 && (
+            {(Number(numChunks || 1) > 1 && typeof effectiveCombinations === "number") ? (
+              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                <span style={{ color: "#6b7280", fontSize: 12 }}>
+                  {effectiveCombinations} / {Number(numChunks || 1)}
+                </span>
+              </div>
+            ) : null}
+            {queueSegments > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>
                     {(queueItems.length ? queueItems : Array.from({ length: queueSegments })).map((item: any, idx: number) => {
