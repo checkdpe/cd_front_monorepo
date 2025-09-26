@@ -55,6 +55,8 @@ export const App: React.FC = () => {
   const [selectedPoint, setSelectedPoint] = useState<{ index: number; ep?: number; ges?: number; cost?: number; letter?: string } | null>(null);
   const [resultsXMetric, setResultsXMetric] = useState<"index" | "cost">("index");
   const [resultsYMetric, setResultsYMetric] = useState<"ep" | "ges">("ep");
+  const [selectedPointDetail, setSelectedPointDetail] = useState<any | null>(null);
+  const [modifierSelection, setModifierSelection] = useState<{ path: string; seq: number[] }[] | null>(null);
   const isChunksTooBig = useMemo(() => {
     if (typeof totalCombinations !== "number") return false;
     const chunks = Math.max(1, Number(numChunks || 1));
@@ -899,6 +901,7 @@ export const App: React.FC = () => {
                   setJsonText((prev) => (prev?.trim() ? prev : text));
                 } catch {}
               }}
+                modifierSelection={modifierSelection}
               onHighlightJsonPath={({ collection, itemKey, indices }) => {
                 try {
                   const ta = textAreaRef.current;
@@ -1175,6 +1178,27 @@ export const App: React.FC = () => {
                       width={720}
                       height={300}
                       onSelectPoint={(p) => setSelectedPoint(p)}
+                      onPointDetail={(d) => {
+                        try {
+                          setSelectedPointDetail(d);
+                          // Extract modifierId array from detail response (support both direct and within redis_obj)
+                          let root: any = d;
+                          const rawRedis = (d && (d as any).redis_obj) as unknown;
+                          if (typeof rawRedis === "string") {
+                            try { root = JSON.parse(rawRedis); } catch { root = d; }
+                          }
+                          const resultArr: any[] = Array.isArray(root?.data?.result) ? root.data.result : (Array.isArray(root?.result) ? root.result : []);
+                          const first = (resultArr && resultArr.length) ? resultArr[0] : root;
+                          const mod = (first && (first.modifierId || first.modifier_id || first.modifier)) as any;
+                          const arr = Array.isArray(mod) ? mod : [];
+                          const normalized = arr
+                            .map((it: any) => ({ path: String(it?.path || ""), seq: Array.isArray(it?.seq) ? (it.seq as any[]).map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [] }))
+                            .filter((it: any) => it.path && it.seq && it.seq.length);
+                          setModifierSelection(normalized.length ? normalized : null);
+                        } catch {
+                          setModifierSelection(null);
+                        }
+                      }}
                       selectedIndex={selectedPoint?.index}
                       primaryColor="#1677ff"
                       xMetric={resultsXMetric}
@@ -1201,6 +1225,35 @@ export const App: React.FC = () => {
                         F: "#FF8300",
                         G: "#FF3238",
                       }} />
+                      {(() => {
+                        try {
+                          const raw = (selectedPointDetail && (selectedPointDetail as any).redis_obj) as unknown;
+                          if (raw == null) return null;
+                          let root: any = null;
+                          if (typeof raw === "string") {
+                            try { root = JSON.parse(raw); } catch { root = null; }
+                          } else if (typeof raw === "object") {
+                            root = raw;
+                          }
+                          if (!root || typeof root !== "object") return null;
+                          const resultArr: any[] = Array.isArray((root as any)?.data?.result) ? (root as any).data.result : (Array.isArray((root as any)?.result) ? (root as any).result : []);
+                          const targetId = (selectedPoint as any)?.id as (string | undefined);
+                          const item = (Array.isArray(resultArr) && resultArr.length)
+                            ? (resultArr.find((it: any) => String(it?.id || "") === String(targetId || "")) || resultArr[0])
+                            : null;
+                          const mod = item ? (item.modifierId || item.modifier_id || item.modifier) : undefined;
+                          if (!mod) return null;
+                          const pretty = JSON.stringify(mod, null, 2);
+                          return (
+                            <div style={{ marginTop: 12 }}>
+                              <div style={{ color: "#4b5563", marginBottom: 6 }}>modifierId</div>
+                              <pre style={{ margin: 0, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
+{pretty}
+                              </pre>
+                            </div>
+                          );
+                        } catch { return null; }
+                      })()}
                     </div>
                   </Card>
                 </div>

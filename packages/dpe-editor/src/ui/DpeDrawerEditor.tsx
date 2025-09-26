@@ -16,6 +16,8 @@ export type DpeDrawerEditorProps = {
   onHighlightJsonPath?: (args: { collection: string; itemKey: string; indices: number[] }) => void;
   // When true, renders as a fixed inline panel instead of overlay drawer
   inline?: boolean;
+  // Optional: selection hints from a simulation detail endpoint
+  modifierSelection?: { path: string; seq: number[] }[] | null;
 };
 
 type VariantId = string; // e.g. "dpe.logement.enveloppe.mur_collection.mur"
@@ -56,9 +58,10 @@ function ensurePath(root: any, path: string[]): any {
   return cursor;
 }
 
-export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath, inline = false }) => {
+export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath, inline = false, modifierSelection = null }) => {
   const [availableOptions, setAvailableOptions] = useState<Record<VariantId, { key: string; description: string; selected: boolean; payload: any }[]>>({});
   const [highlighted, setHighlighted] = useState<Record<VariantId, Record<string, boolean>>>({});
+  const [externalScopeHighlight, setExternalScopeHighlight] = useState<Record<VariantId, number[]>>({});
   const [pricing, setPricing] = useState<Record<VariantId, { increments: number[]; priceVar: number[]; priceFix: number[]; incrementUnit: string; priceUnit: string }>>({});
 
   const [colSettings, setColSettings] = useState<{ open: boolean; variant: VariantId | null; field: "increments" | "priceVar" | "priceFix" | null; tempUnit: string; tempKey: string; tempForcedInputs: string }>({
@@ -757,6 +760,99 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     } catch {}
   }, [open, rootJsonText, templateScenarioIds, variantDefs]);
 
+  // Apply external modifier selection: set elements_scope for matching variant when unambiguous
+  useEffect(() => {
+    try {
+      if (!open) return;
+      if (!modifierSelection || !Array.isArray(modifierSelection) || modifierSelection.length === 0) return;
+      // Parse current runs
+      let parsed: any = [];
+      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+      if (!Array.isArray(parsed)) return;
+      const runs: any[] = parsed;
+      let changed = false;
+      for (const mod of modifierSelection) {
+        try {
+          const path = String((mod as any)?.path || "");
+          const seq: number[] = Array.isArray((mod as any)?.seq) ? ((mod as any).seq as number[]).map((n) => Number(n)) : [];
+          if (!path || !seq.length) continue;
+          const parsedPath = parseVariantPath(path);
+          if (!parsedPath) continue;
+          const variantId = `dpe.logement.enveloppe.${parsedPath.collection}.${parsedPath.itemKey}`;
+          // Only apply when there is a single target (seq length is 1)
+          if (seq.length !== 1) continue;
+          const desired = seq[0];
+          const entryIndex = runs.findIndex((r) => r && r.elements_variant === variantId);
+          if (entryIndex === -1) continue;
+          const entry = runs[entryIndex];
+          // Resolve envelope items for this variant to map id->index
+          const collectionObj = envelopeData?.[parsedPath.collection];
+          let items: any[] = [];
+          if (Array.isArray(collectionObj?.[parsedPath.itemKey])) {
+            items = collectionObj[parsedPath.itemKey] as any[];
+          } else if (Array.isArray(collectionObj)) {
+            items = (collectionObj as any[]).map((slot) => (slot && typeof slot === "object" ? slot[parsedPath.itemKey] : undefined)).filter(Boolean);
+          }
+          if (!Array.isArray(items) || items.length === 0) continue;
+          let idxToSelect = -1;
+          if (desired === -1) {
+            // "current" -> select the only item when unambiguous (single item)
+            if (items.length === 1) idxToSelect = 0;
+          } else if (Number.isFinite(desired)) {
+            // Try match by donnee_entree.reference
+            const targetId = Number(desired);
+            idxToSelect = items.findIndex((it: any) => Number((it?.donnee_entree?.reference as any)) === targetId);
+          }
+          if (idxToSelect !== -1) {
+            const scopes: number[] = [idxToSelect];
+            if (!Array.isArray(entry.elements_scope) || String(entry.elements_scope) !== String(scopes)) {
+              entry.elements_scope = scopes;
+              changed = true;
+            }
+          }
+        } catch {}
+      }
+      if (changed) onApply(JSON.stringify(runs, null, 2));
+    } catch {}
+  }, [open, modifierSelection, rootJsonText, envelopeData, variantDefs, onApply]);
+
+  // Compute indices to visually outline from modifierSelection (single-target only)
+  useEffect(() => {
+    try {
+      if (!modifierSelection || !Array.isArray(modifierSelection) || modifierSelection.length === 0) { setExternalScopeHighlight({}); return; }
+      const map: Record<VariantId, number[]> = {};
+      for (const mod of modifierSelection) {
+        try {
+          const path = String((mod as any)?.path || "");
+          const seq: number[] = Array.isArray((mod as any)?.seq) ? ((mod as any).seq as number[]).map((n) => Number(n)) : [];
+          if (!path || seq.length !== 1) continue; // only single target
+          const parsedPath = parseVariantPath(path);
+          if (!parsedPath) continue;
+          const variantId = `dpe.logement.enveloppe.${parsedPath.collection}.${parsedPath.itemKey}`;
+          const desired = seq[0];
+          const collectionObj = envelopeData?.[parsedPath.collection];
+          let items: any[] = [];
+          if (Array.isArray(collectionObj?.[parsedPath.itemKey])) {
+            items = collectionObj[parsedPath.itemKey] as any[];
+          } else if (Array.isArray(collectionObj)) {
+            items = (collectionObj as any[]).map((slot) => (slot && typeof slot === "object" ? slot[parsedPath.itemKey] : undefined)).filter(Boolean);
+          }
+          let idxToSelect = -1;
+          if (desired === -1) {
+            if (items.length === 1) idxToSelect = 0; // #current implicit single item
+          } else if (Number.isFinite(desired)) {
+            const targetId = Number(desired);
+            idxToSelect = items.findIndex((it: any) => Number((it?.donnee_entree?.reference as any)) === targetId);
+          }
+          if (idxToSelect !== -1) {
+            map[variantId] = [idxToSelect];
+          }
+        } catch {}
+      }
+      setExternalScopeHighlight(map);
+    } catch { setExternalScopeHighlight({}); }
+  }, [modifierSelection, envelopeData]);
+
   function toggleScenarioPresence(variantId: VariantId, idx: number, enabled: boolean) {
     try {
       if (enabled) {
@@ -937,7 +1033,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                                 gap: 8,
                                 padding: "4px 6px",
                                 borderRadius: 6,
-                                background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : "transparent",
+                                background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : ((externalScopeHighlight[v.id] && (externalScopeHighlight[v.id] as number[]).includes(idx)) ? "#eff6ff" : "transparent"),
+                                border: (externalScopeHighlight[v.id] && (externalScopeHighlight[v.id] as number[]).includes(idx)) ? "2px solid #2563eb" : "1px solid transparent",
                                 transition: "background-color 600ms ease",
                               }}
                             >
@@ -1061,6 +1158,63 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                     </div>
                     <div style={{ color: "#9ca3af" }}>{pricing[v.id]?.priceUnit || "EUR/m2"}</div>
                   </div>
+
+                  {/* Row 0: always-present current scenario derived from envelopeData */}
+                  {(() => {
+                    try {
+                      // Determine configured input key to read from envelope items
+                      const configuredInputKey = mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "donnee_entree.epaisseur_isolation";
+                      const inputPath = String(configuredInputKey || "").split(".").filter(Boolean);
+                      // Determine current scopes for this variant
+                      let parsed: any = [];
+                      try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                      const runsArr: any[] = Array.isArray(parsed) ? parsed : [];
+                      const entry = runsArr.find((r) => r && r.elements_variant === v.id) || {};
+                      let scopes: number[] = Array.isArray(entry.elements_scope) ? (entry.elements_scope as number[]) : [];
+                      if (!scopes.length) {
+                        // Fallback to UI options selection if JSON has no scopes
+                        scopes = (availableOptions[v.id] || []).map((o, idx) => (o.selected ? idx : -1)).filter((n) => n !== -1);
+                      }
+                      // Collect values from envelope items for selected scopes
+                      const collectionObj = envelopeData?.[v.collection];
+                      let items: any[] = [];
+                      if (Array.isArray(collectionObj?.[v.itemKey])) {
+                        items = collectionObj[v.itemKey] as any[];
+                      } else if (Array.isArray(collectionObj)) {
+                        items = (collectionObj as any[]).map((slot) => (slot && typeof slot === "object" ? slot[v.itemKey] : undefined)).filter(Boolean);
+                      }
+                      const nums: number[] = scopes
+                        .map((idx) => {
+                          const item = items?.[idx];
+                          const val = inputPath.length ? deepGet(item, inputPath as any) : undefined;
+                          const num = typeof val === "number" ? val : Number(val);
+                          return Number.isFinite(num) ? num : NaN;
+                        })
+                        .filter((n) => Number.isFinite(n)) as number[];
+                      let displayVal: string = "—";
+                      if (nums.length) {
+                        const min = Math.min(...nums);
+                        const max = Math.max(...nums);
+                        displayVal = min === max ? String(min) : `${min}-${max}`;
+                      }
+                      return (
+                        <>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#6b7280", fontSize: 12 }}>
+                            <Checkbox checked disabled />
+                            <span>#current</span>
+                          </label>
+                          <div style={{ fontSize: 12, color: "#374151" }}>
+                            {displayVal}
+                          </div>
+                          <div>
+                            <InputNumber size="small" controls={false} min={0} value={0} disabled style={{ width: "100%" }} />
+                          </div>
+                        </>
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
 
                   {(() => {
                     const presentIds = getPresentScenarioIds(v.id);
