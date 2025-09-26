@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
-import { Select, Space } from "antd";
+import { Select, Space, Button } from "antd";
 
 export type SimulationResultsProps = {
   dpeId: string;
@@ -19,6 +19,7 @@ export type SimulationResultsProps = {
   yMetric?: "ep" | "ges";
   onXMetricChange?: (metric: "index" | "cost") => void;
   onYMetricChange?: (metric: "ep" | "ges") => void;
+  onPointDetail?: (detail: unknown) => void;
 };
 
 type FetchState<T> =
@@ -33,6 +34,7 @@ type ChartPoint = {
   ges?: number;
   cost?: number;
   letter?: string;
+  id?: string;
 };
 
 const DEFAULT_MAP_COLOR_DPE: { [key: string]: string } = {
@@ -58,11 +60,13 @@ function parseSimulationGraphData(payload: unknown): ChartPoint[] | null {
       const ges = Number(res?.emission_ges_5_usages_m2);
       const cost = Number(item?.cost ?? res?.cost);
       const letter = (res?.bilan_dpe_letter as string | undefined) || undefined;
+      const id = (item?.id as string | undefined) ?? (res?.id as string | undefined);
       const p: ChartPoint = { index: idx };
       if (Number.isFinite(ep)) p.ep = ep;
       if (Number.isFinite(ges)) p.ges = ges;
       if (Number.isFinite(cost)) p.cost = cost;
       if (letter && typeof letter === "string") p.letter = letter;
+      if (id && typeof id === "string") p.id = id;
       return p;
     });
     return points;
@@ -88,6 +92,7 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
   yMetric: controlledYMetric,
   onXMetricChange,
   onYMetricChange,
+  onPointDetail,
 }) => {
   const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
   const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
@@ -95,6 +100,8 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
   const [localXMetric, setLocalXMetric] = useState<"index" | "cost">("index");
   const [localYMetric, setLocalYMetric] = useState<"ep" | "ges">("ep");
   const [localSelectedIndex, setLocalSelectedIndex] = useState<number | undefined>(undefined);
+  const [xDomainOverride, setXDomainOverride] = useState<[number, number] | null>(null);
+  const [yDomainOverride, setYDomainOverride] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,8 +194,11 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
     const xDomain = d3.extent(data, (d) => d.x) as [number, number];
     const yDomain = d3.extent(data, (d) => d.y) as [number, number];
 
-    const x = d3.scaleLinear().domain(xDomain || [0, 1]).nice().range([0, innerWidth]);
-    const y = d3.scaleLinear().domain(yDomain || [0, 1]).nice().range([innerHeight, 0]);
+    const xDomainEffective = (xDomainOverride ?? xDomain) || [0, 1];
+    const yDomainEffective = (yDomainOverride ?? yDomain) || [0, 1];
+
+    const x = d3.scaleLinear().domain(xDomainEffective).nice().range([0, innerWidth]);
+    const y = d3.scaleLinear().domain(yDomainEffective).nice().range([innerHeight, 0]);
 
     g.append("g")
       .attr("transform", `translate(0,${innerHeight})`)
@@ -219,11 +229,34 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
       })
       .attr("opacity", 0.95)
       .style("pointer-events", "all")
-      .style("cursor", onSelectPoint ? "pointer" : "default")
+      .style("cursor", (onSelectPoint || onPointDetail) ? "pointer" : "default")
       .on("click", (_, d) => {
         try {
           setLocalSelectedIndex(d.raw?.index);
           onSelectPoint && onSelectPoint(d.raw);
+        } catch {}
+        try {
+          const detailId = d.raw?.id as (string | undefined);
+          const runName = simul;
+          if (!detailId || !runName || !resolvedToken) return;
+          const url = new URL("/backoffice/simulation_graph_detail", apiBaseUrl);
+          url.searchParams.set("ref_ademe", dpeId);
+          url.searchParams.set("run_name", runName);
+          url.searchParams.set("id", detailId);
+          fetch(url.toString(), {
+            headers: {
+              Accept: "*/*",
+              Authorization: `Bearer ${resolvedToken}`,
+            },
+          })
+            .then(async (res) => {
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return res.json();
+            })
+            .then((json) => {
+              try { onPointDetail && onPointDetail(json); } catch {}
+            })
+            .catch(() => { /* ignore detail errors for now */ });
         } catch {}
       });
 
@@ -241,7 +274,31 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
       .attr("fill", "#444444")
       .style("pointer-events", "none")
       .text((d) => d.letter);
-  }, [points, width, height, controlledXMetric, controlledYMetric, localXMetric, localYMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex]);
+
+    const brush = d3
+      .brush()
+      .extent([[0, 0], [innerWidth, innerHeight]])
+      .on("end", (event: any) => {
+        const selection = event.selection as [[number, number], [number, number]] | null;
+        if (!selection) return;
+        const [[x0, y0], [x1, y1]] = selection;
+        if (Math.abs(x1 - x0) < 2 || Math.abs(y1 - y0) < 2) {
+          return;
+        }
+        const newX0 = x.invert(Math.min(x0, x1));
+        const newX1 = x.invert(Math.max(x0, x1));
+        const newY0 = y.invert(Math.max(y0, y1));
+        const newY1 = y.invert(Math.min(y0, y1));
+        if (!Number.isFinite(newX0) || !Number.isFinite(newX1) || !Number.isFinite(newY0) || !Number.isFinite(newY1)) {
+          return;
+        }
+        setXDomainOverride([newX0, newX1]);
+        setYDomainOverride([newY0, newY1]);
+      });
+
+    const brushG = g.append("g").attr("class", "brush").call(brush as any);
+    try { (brushG as any).lower(); } catch {}
+  }, [points, width, height, controlledXMetric, controlledYMetric, localXMetric, localYMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex, xDomainOverride, yDomainOverride, onSelectPoint, onPointDetail, apiBaseUrl, dpeId, simul, resolvedToken]);
 
   if (state.status === "loading") {
     return <div className={className}>Loading simulation results…</div>;
@@ -290,6 +347,9 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
             ]}
           />
         </Space>
+        <Button size="small" onClick={() => { setXDomainOverride(null); setYDomainOverride(null); }} disabled={!xDomainOverride && !yDomainOverride}>
+          Reset zoom
+        </Button>
       </div>
       <svg ref={svgRef} width={width} height={height} />
     </div>
