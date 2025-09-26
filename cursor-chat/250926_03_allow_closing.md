@@ -1,3 +1,25 @@
+# Update left panel button functionality
+_Exported on 26/09/2025 at 16:44:54 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+on left panel : 2 buttons for closing 
+one close : (it just closes the left panel and let the user edit json in main view)
+one "cancel" with current behavior of close button
+
+---
+
+**Cursor**
+
+I'll search the codebase to locate the left panel/drawer component and the current close/cancel behaviors so I can add the two buttons with correct handlers.
+
+I'll open and update the `DpeDrawerEditor` to add two buttons in the header: a "Close" that simply closes, and a "Cancel" that uses the current discard-confirm behavior. Then I'll adjust the Drawer extra to include both as well.
+
+I’m going to update the left panel header and drawer actions to add two buttons: “Close” (silent close) and “Cancel” (discard-confirm with current behavior), keeping “Apply” as primary.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
 import { TemplateEditorModal } from "@acme/template-editor";
@@ -1477,4 +1499,23 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   );
 };
 
+
+
+```
+
+- I’ll add two actions to the left panel:
+  - Close: silently close the panel and keep current JSON edits visible in the main view.
+  - Cancel: keep the existing confirm-discard behavior (revert to original and close).
+
+I updated `DpeDrawerEditor` so both inline and Drawer variants now have these buttons.
+
+- Inline header now shows: Close, Cancel, Apply.
+- Drawer extra actions now show: Close, Cancel, Apply.
+
+You can find them in `packages/dpe-editor/src/ui/DpeDrawerEditor.tsx`.
+
+- Close uses `onClose`.
+- Cancel uses the previous `handleDrawerClose` confirm flow.
+
+All good with lint.
 
