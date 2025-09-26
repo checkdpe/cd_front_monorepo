@@ -1,3 +1,52 @@
+# Adjust access to modifierId in redis_obj
+_Exported on 26/09/2025 at 17:01:49 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+graph detail management : 
+redis_obj has this format :
+redis_obj": {
+        "id": "2501E2911742H-8",
+        "modifierId": [
+            {
+                "path": "dpe.logement.enveloppe.plancher_haut_collection.plancher_haut",
+                "seq": [
+                    302
+                ]
+            },
+            {
+                "path": "dpe.logement.enveloppe.plancher_bas_collection.plancher_bas",
+                "seq": [
+                    102
+                ]
+            },
+            {
+                "path": "dpe.logement.enveloppe.mur_collection.mur",
+                "seq": [
+                    202
+                ]
+            }
+        ],...
+
+please adjust your access to "modifierId" 
+
+---
+
+**Cursor**
+
+I'll search the codebase for where `redis_obj` and `modifierId` are used to update the graph detail access accordingly.
+
+I'll update the graph detail handler to parse `redis_obj` whether it's a string or object, and read `modifierId` from either `root.data.result[]` or directly at the top level. Then I'll adjust the UI rendering similarly.
+
+I'll update `apps/simul/src/App.tsx` to:
+- Parse `redis_obj` when it's an object (not only string) for `modifierSelection` extraction.
+- When rendering detail, fall back to top-level `redis_obj` for `modifierId` if no `data.result[]` exists.
+
+Then I'll run a linter check on the edited file.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
@@ -1332,4 +1381,14 @@ export const App: React.FC = () => {
   );
 };
 
+
+
+```
+
+- Parsed `redis_obj` when it’s an object in addition to a string for `modifierSelection`.
+- Detail rendering now falls back to top-level `redis_obj` for `modifierId` when `data.result[]` is absent.
+
+You should now see correct `modifierId` handling with your provided structure:
+- Reads `redis_obj.data.result[].modifierId` when available.
+- If `result[]` missing, reads `redis_obj.modifierId` directly.
 
