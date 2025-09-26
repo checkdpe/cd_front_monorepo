@@ -164,7 +164,10 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
             <Button onClick={() => {
               setCreating((v) => {
                 const next = !v;
-                if (next && !newName) setNewName("simul_new");
+                if (next) {
+                  const rnd = Math.floor(Math.random() * 1000001);
+                  setNewName(`dev_simul_new${rnd}`);
+                }
                 if (!next) { setNewError(null); }
                 return next;
               });
