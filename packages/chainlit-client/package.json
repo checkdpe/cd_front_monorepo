@@ -1,8 +1,9 @@
 {
-  "name": "@acme/dpe-editor",
+  "name": "@acme/chainlit-client",
   "version": "0.1.0",
   "private": false,
   "type": "module",
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -12,20 +13,21 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "tsc -b && eslint .",
-    "test": "echo 'no tests'"
+    "check": "tsc -b && eslint . && vitest run",
+    "test": "vitest"
   },
   "peerDependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "antd": "^5.0.0"
+    "react-dom": "^18.2.0"
+  },
+  "dependencies": {
+    "@acme/chainlit": "workspace:*",
+    "@chainlit/react-client": "^0.2.4",
+    "recoil": "^0.7.7"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
-    "antd": "^5.27.4"
-  },
-  "dependencies": {
-    "@acme/template-editor": "workspace:*"
+    "vitest": "^1.6.0"
   }
 }
 

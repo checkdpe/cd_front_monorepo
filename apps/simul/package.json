@@ -15,10 +15,15 @@
     "react-dom": "^18.2.0",
     "antd": "^5.27.4",
     "@ant-design/icons": "^6.0.2",
+    "@acme/chainlit": "workspace:*",
+    "@acme/chainlit-client": "workspace:*",
     "@acme/top-menu": "workspace:*",
     "@acme/simulation-scenarios": "workspace:*",
     "@acme/dpe-editor": "workspace:*",
-    "@acme/load-scenario": "workspace:*"
+    "@acme/load-scenario": "workspace:*",
+    "@acme/simulation-results": "workspace:*",
+    "@acme/simulation-detail": "workspace:*",
+    "@chainlit/react-client": "^0.2.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

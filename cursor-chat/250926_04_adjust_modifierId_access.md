@@ -1,8 +1,57 @@
+# Adjust access to modifierId in redis_obj
+_Exported on 26/09/2025 at 17:01:49 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+graph detail management : 
+redis_obj has this format :
+redis_obj": {
+        "id": "2501E2911742H-8",
+        "modifierId": [
+            {
+                "path": "dpe.logement.enveloppe.plancher_haut_collection.plancher_haut",
+                "seq": [
+                    302
+                ]
+            },
+            {
+                "path": "dpe.logement.enveloppe.plancher_bas_collection.plancher_bas",
+                "seq": [
+                    102
+                ]
+            },
+            {
+                "path": "dpe.logement.enveloppe.mur_collection.mur",
+                "seq": [
+                    202
+                ]
+            }
+        ],...
+
+please adjust your access to "modifierId" 
+
+---
+
+**Cursor**
+
+I'll search the codebase for where `redis_obj` and `modifierId` are used to update the graph detail access accordingly.
+
+I'll update the graph detail handler to parse `redis_obj` whether it's a string or object, and read `modifierId` from either `root.data.result[]` or directly at the top level. Then I'll adjust the UI rendering similarly.
+
+I'll update `apps/simul/src/App.tsx` to:
+- Parse `redis_obj` when it's an object (not only string) for `modifierSelection` extraction.
+- When rendering detail, fall back to top-level `redis_obj` for `modifierId` if no `data.result[]` exists.
+
+Then I'll run a linter check on the edited file.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
-import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse, Tooltip, Switch } from "antd";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse, Tooltip } from "antd";
 import { ExportOutlined, LeftOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { LoadScenarioModal } from "@acme/load-scenario";
@@ -57,24 +106,11 @@ export const App: React.FC = () => {
   const [resultsYMetric, setResultsYMetric] = useState<"ep" | "ges">("ep");
   const [selectedPointDetail, setSelectedPointDetail] = useState<any | null>(null);
   const [modifierSelection, setModifierSelection] = useState<{ path: string; seq: number[] }[] | null>(null);
-  const [expertMode, setExpertMode] = useState<boolean>(false);
-  const [overrideCombinations, setOverrideCombinations] = useState<number | undefined>(undefined);
   const isChunksTooBig = useMemo(() => {
     if (typeof totalCombinations !== "number") return false;
     const chunks = Math.max(1, Number(numChunks || 1));
     return (totalCombinations / chunks) > 50;
   }, [totalCombinations, numChunks]);
-  const effectiveCombinations = useMemo(() => {
-    try {
-      if (overrideCombinations != null) {
-        const n = Number(overrideCombinations);
-        return Number.isFinite(n) ? n : undefined;
-      }
-      return typeof totalCombinations === "number" ? totalCombinations : undefined;
-    } catch {
-      return undefined;
-    }
-  }, [overrideCombinations, totalCombinations]);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
@@ -699,18 +735,20 @@ export const App: React.FC = () => {
   async function handleSubmit() {
     try {
       const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-      const baseQuery: Record<string, unknown> = { ref_ademe: refAdeme };
-      if (expertMode && apiDebug != null) baseQuery.api_debug = Boolean(apiDebug);
-      if (expertMode) { baseQuery.skip = skip; baseQuery.limit = limit; }
+      const baseQuery = {
+        api_debug: Boolean(apiDebug),
+        skip,
+        limit,
+        ref_ademe: refAdeme,
+      } as Record<string, unknown>;
       const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
       const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
-      const nbCombinationsToSend = Number(((overrideCombinations != null) ? overrideCombinations : totalCombinations) || 0);
       const body = {
         redis_db: 1,
         task: "tasks.ext_o3cl_managing.direct_scenarios",
         args: {
           ref_ademe: refAdeme,
-          nb_combinations: nbCombinationsToSend,
+          nb_combinations: Number(totalCombinations || 0),
           query,
         },
       };
@@ -748,8 +786,8 @@ export const App: React.FC = () => {
             run_name: simulLog || "dev_report_o3cl",
             ref_ademe: refAdeme,
             nb_chunks: Number(numChunks || 1),
-            nb_workers: Math.min(100, Number(numWorkers || 1)),
-            nb_combinations: nbCombinationsToSend,
+            nb_workers: Number(numWorkers || 1),
+            nb_combinations: Number(totalCombinations || 0),
             query,
           },
         } as Record<string, unknown>;
@@ -782,8 +820,9 @@ export const App: React.FC = () => {
 
   function handleConfirmWorkers() {
     const value = Number(numWorkers || 0);
-    if (value > 100) {
-      setWorkersError("nb workers should be <= 100");
+    const allowed = [1, 2, 3, 4, 6, 8];
+    if (!allowed.includes(value)) {
+      setWorkersError(`Invalid workers: ${value}. Allowed: ${allowed.join(", ")}`);
       setConfirmedWorkers(undefined);
       return;
     }
@@ -1010,37 +1049,29 @@ export const App: React.FC = () => {
                         {typeof totalCombinations === "number" ? (
                           <strong style={{ fontWeight: 600 }}>combinations: {totalCombinations}</strong>
                         ) : null}
-                        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()}>
-                          <span style={{ color: "#6b7280", fontSize: 12 }}>Expert</span>
-                          <Switch size="small" checked={expertMode} onChange={setExpertMode} />
-                        </div>
                       </div>
                     ),
                     children: (
                       <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                        {expertMode ? (
-                          <>
-                            <div>
-                              <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
-                              <Select
-                                value={apiDebug as number | undefined}
-                                onChange={(v) => setApiDebug(v)}
-                                allowClear
-                                placeholder="none"
-                                options={apiDebugOptions}
-                                style={{ width: "100%" }}
-                              />
-                            </div>
-                            <div>
-                              <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
-                              <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
-                            </div>
-                            <div>
-                              <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
-                              <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
-                            </div>
-                          </>
-                        ) : null}
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
+                          <Select
+                            value={apiDebug as number | undefined}
+                            onChange={(v) => setApiDebug(v)}
+                            allowClear
+                            placeholder="none"
+                            options={apiDebugOptions}
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
+                          <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
+                          <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
                         
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
@@ -1048,25 +1079,9 @@ export const App: React.FC = () => {
                         </div>
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
-                          {expertMode ? (
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                              <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: 140 }} min={1} max={100} />
-                              <Button size="small" onClick={handleConfirmWorkers}>apply</Button>
-                              {workersError ? <span style={{ color: "#ef4444", fontSize: 12 }}>{workersError}</span> : (confirmedWorkers ? <span style={{ color: "#16a34a", fontSize: 12 }}>applied: {confirmedWorkers}</span> : null)}
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                              <InputNumber value={1} disabled style={{ width: 140 }} min={1} />
-                              <span style={{ color: "#6b7280", fontSize: 12 }}>(read-only)</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <div style={{ marginBottom: 6, color: "#4b5563" }}>combinations override</div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <InputNumber value={overrideCombinations as number | null as any} onChange={(v) => setOverrideCombinations(v == null ? undefined : Number(v))} style={{ width: 180 }} min={0} placeholder={typeof totalCombinations === "number" ? String(totalCombinations) : undefined} />
-                            <span style={{ color: "#6b7280", fontSize: 12 }}>leave empty to use computed</span>
+                            <InputNumber value={1} disabled style={{ width: 140 }} min={1} />
+                            <span style={{ color: "#6b7280", fontSize: 12 }}>(read-only)</span>
                           </div>
                         </div>
                       </Space>
@@ -1146,18 +1161,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
-            {(Number(numChunks || 1) > 1 && typeof effectiveCombinations === "number") ? (
-              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-                <span style={{ color: "#6b7280", fontSize: 12 }}>
-                  {(() => {
-                    const v = Number(effectiveCombinations) / Number(numChunks || 1);
-                    if (!Number.isFinite(v)) return null;
-                    return Number.isInteger(v) ? v : Number(v.toFixed(2));
-                  })()} runs per chunk
-                </span>
-              </div>
-            ) : null}
-            {queueSegments > 0 && (
+              {queueSegments > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>
                     {(queueItems.length ? queueItems : Array.from({ length: queueSegments })).map((item: any, idx: number) => {
@@ -1377,4 +1381,14 @@ export const App: React.FC = () => {
   );
 };
 
+
+
+```
+
+- Parsed `redis_obj` when it’s an object in addition to a string for `modifierSelection`.
+- Detail rendering now falls back to top-level `redis_obj` for `modifierId` when `data.result[]` is absent.
+
+You should now see correct `modifierId` handling with your provided structure:
+- Reads `redis_obj.data.result[].modifierId` when available.
+- If `result[]` missing, reads `redis_obj.modifierId` directly.
 
