@@ -748,7 +748,7 @@ export const App: React.FC = () => {
             run_name: simulLog || "dev_report_o3cl",
             ref_ademe: refAdeme,
             nb_chunks: Number(numChunks || 1),
-            nb_workers: Number(numWorkers || 1),
+            nb_workers: Math.min(100, Number(numWorkers || 1)),
             nb_combinations: nbCombinationsToSend,
             query,
           },
@@ -782,9 +782,8 @@ export const App: React.FC = () => {
 
   function handleConfirmWorkers() {
     const value = Number(numWorkers || 0);
-    const allowed = [1, 2, 3, 4, 6, 8];
-    if (!allowed.includes(value)) {
-      setWorkersError(`Invalid workers: ${value}. Allowed: ${allowed.join(", ")}`);
+    if (value > 100) {
+      setWorkersError("nb workers should be <= 100");
       setConfirmedWorkers(undefined);
       return;
     }
@@ -1051,7 +1050,7 @@ export const App: React.FC = () => {
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
                           {expertMode ? (
                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                              <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: 140 }} min={1} />
+                              <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: 140 }} min={1} max={100} />
                               <Button size="small" onClick={handleConfirmWorkers}>apply</Button>
                               {workersError ? <span style={{ color: "#ef4444", fontSize: 12 }}>{workersError}</span> : (confirmedWorkers ? <span style={{ color: "#16a34a", fontSize: 12 }}>applied: {confirmedWorkers}</span> : null)}
                             </div>
@@ -1150,7 +1149,7 @@ export const App: React.FC = () => {
             {(Number(numChunks || 1) > 1 && typeof effectiveCombinations === "number") ? (
               <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
                 <span style={{ color: "#6b7280", fontSize: 12 }}>
-                  {effectiveCombinations} / {Number(numChunks || 1)}
+                  {Math.ceil(Number(effectiveCombinations) / Number(numChunks || 1))}
                 </span>
               </div>
             ) : null}
