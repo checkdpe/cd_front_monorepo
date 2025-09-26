@@ -29,11 +29,17 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<SavedScenarioItem[] | null>(null);
+  const [creating, setCreating] = useState<boolean>(false);
+  const [newName, setNewName] = useState<string>("");
+  const [newError, setNewError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setItems(null);
     setError(null);
+    setCreating(false);
+    setNewName("");
+    setNewError(null);
     // Preset ref_ademe with current one each time the modal opens
     setRefAdeme(initialRefAdeme || "");
   }, [open, initialRefAdeme]);
@@ -89,6 +95,29 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
     }
   }
 
+  function handleCreateNew() {
+    try {
+      setNewError(null);
+      const ra = (refAdeme || "").trim();
+      const name = (newName || "").trim();
+      if (!ra) {
+        setNewError("ref_ademe required");
+        return;
+      }
+      if (!name) {
+        setNewError("Enter a name");
+        return;
+      }
+      // Basic validation: letters, numbers, dash, underscore and dots, length <= 64
+      const ok = /^[A-Za-z0-9._-]{1,64}$/.test(name);
+      if (!ok) {
+        setNewError("Use letters, numbers, . _ - (max 64)");
+        return;
+      }
+      onSelect({ ref_ademe: ra, label: name });
+    } catch {}
+  }
+
   const columns = useMemo(
     () => [
       { title: "Label", dataIndex: "label", key: "label", render: (v: any) => v || "(no label)" },
@@ -130,10 +159,39 @@ export const LoadScenarioModal: React.FC<LoadScenarioModalProps> = ({ open, onCa
           <div style={{ marginBottom: 6, color: "#4b5563" }}>ref_ademe</div>
           <Input value={refAdeme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRefAdeme(e.target.value)} placeholder="e.g. 2394E0980765L" />
         </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Button onClick={() => {
+              setCreating((v) => {
+                const next = !v;
+                if (next && !newName) setNewName("simul_new");
+                if (!next) { setNewError(null); }
+                return next;
+              });
+            }}>new</Button>
+            {creating ? (
+              <>
+                <Input
+                  placeholder="name"
+                  value={newName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
+                  onPressEnter={handleCreateNew}
+                  style={{ width: 220 }}
+                />
+                <Button type="primary" onClick={handleCreateNew}>go</Button>
+              </>
+            ) : null}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button onClick={onCancel}>Cancel</Button>
+            {!creating && (
+              <Button type="primary" onClick={fetchSaved} loading={loading}>Fetch</Button>
+            )}
+          </div>
         </div>
+        {newError ? (
+          <div style={{ color: "#b91c1c" }}>{newError}</div>
+        ) : null}
         {error && (
           <div style={{ color: "#b91c1c" }}>{error}</div>
         )}
