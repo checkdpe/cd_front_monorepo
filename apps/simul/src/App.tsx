@@ -1149,7 +1149,11 @@ export const App: React.FC = () => {
             {(Number(numChunks || 1) > 1 && typeof effectiveCombinations === "number") ? (
               <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
                 <span style={{ color: "#6b7280", fontSize: 12 }}>
-                  {Math.ceil(Number(effectiveCombinations) / Number(numChunks || 1))}
+                  {(() => {
+                    const v = Number(effectiveCombinations) / Number(numChunks || 1);
+                    if (!Number.isFinite(v)) return null;
+                    return Number.isInteger(v) ? v : Number(v.toFixed(2));
+                  })()} runs per chunk
                 </span>
               </div>
             ) : null}
