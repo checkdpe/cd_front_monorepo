@@ -62,6 +62,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   const [availableOptions, setAvailableOptions] = useState<Record<VariantId, { key: string; description: string; selected: boolean; payload: any }[]>>({});
   const [highlighted, setHighlighted] = useState<Record<VariantId, Record<string, boolean>>>({});
   const [externalScopeHighlight, setExternalScopeHighlight] = useState<Record<VariantId, number[]>>({});
+  const [externalScenarioHighlight, setExternalScenarioHighlight] = useState<Record<VariantId, number[]>>({});
+  const [externalScenarioHighlightPerOption, setExternalScenarioHighlightPerOption] = useState<Record<VariantId, Record<string, number>>>({});
   const [pricing, setPricing] = useState<Record<VariantId, { increments: number[]; priceVar: number[]; priceFix: number[]; incrementUnit: string; priceUnit: string }>>({});
 
   const [colSettings, setColSettings] = useState<{ open: boolean; variant: VariantId | null; field: "increments" | "priceVar" | "priceFix" | null; tempUnit: string; tempKey: string; tempForcedInputs: string }>({
@@ -821,6 +823,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
     try {
       if (!modifierSelection || !Array.isArray(modifierSelection) || modifierSelection.length === 0) { setExternalScopeHighlight({}); return; }
       const map: Record<VariantId, number[]> = {};
+      const scenarioMap: Record<VariantId, number[]> = {};
       for (const mod of modifierSelection) {
         try {
           const path = String((mod as any)?.path || "");
@@ -847,11 +850,51 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           if (idxToSelect !== -1) {
             map[variantId] = [idxToSelect];
           }
+          // Scenario highlight: -1 => #current; otherwise scenario id equals desired
+          if (desired === -1) {
+            // Use a sentinel index -1 for #current, the UI will treat it specially
+            const prev = scenarioMap[variantId] || [];
+            if (!prev.includes(-1)) scenarioMap[variantId] = [...prev, -1];
+          } else if (Number.isFinite(desired)) {
+            const prev = scenarioMap[variantId] || [];
+            if (!prev.includes(Number(desired))) scenarioMap[variantId] = [...prev, Number(desired)];
+          }
         } catch {}
       }
       setExternalScopeHighlight(map);
+      setExternalScenarioHighlight(scenarioMap);
     } catch { setExternalScopeHighlight({}); }
   }, [modifierSelection, envelopeData]);
+
+  // Compute per-option scenario highlight mapping: for each variant, map the k-th selected option to seq[k]
+  useEffect(() => {
+    try {
+      if (!modifierSelection || !Array.isArray(modifierSelection) || modifierSelection.length === 0) { setExternalScenarioHighlightPerOption({}); return; }
+      const perOption: Record<VariantId, Record<string, number>> = {};
+      for (const mod of modifierSelection) {
+        try {
+          const path = String((mod as any)?.path || "");
+          const seq: number[] = Array.isArray((mod as any)?.seq) ? ((mod as any).seq as number[]).map((n) => Number(n)) : [];
+          if (!path || !seq.length) continue;
+          const parsedPath = parseVariantPath(path);
+          if (!parsedPath) continue;
+          const variantId = `dpe.logement.enveloppe.${parsedPath.collection}.${parsedPath.itemKey}`;
+          const options = availableOptions[variantId] || [];
+          const selectedIndices: number[] = options.map((o, idx) => (o && o.selected ? idx : -1)).filter((n) => n !== -1);
+          const count = Math.min(seq.length, selectedIndices.length);
+          for (let i = 0; i < count; i += 1) {
+            const optIdx = selectedIndices[i];
+            const chosen = Number(seq[i]);
+            if (!perOption[variantId]) perOption[variantId] = {};
+            perOption[variantId][String(optIdx)] = chosen;
+          }
+        } catch {}
+      }
+      setExternalScenarioHighlightPerOption(perOption);
+    } catch {
+      setExternalScenarioHighlightPerOption({});
+    }
+  }, [modifierSelection, availableOptions]);
 
   function toggleScenarioPresence(variantId: VariantId, idx: number, enabled: boolean) {
     try {
@@ -1130,6 +1173,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                     {(() => {
                                       try {
+                                        const chosen = externalScenarioHighlightPerOption[v.id]?.[String(idx)];
                                         const configuredInputKey = mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "donnee_entree.epaisseur_isolation";
                                         const inputPath = String(configuredInputKey || "").split(".").filter(Boolean);
                                         const collectionObj = envelopeData?.[v.collection];
@@ -1143,14 +1187,16 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                                         const val = inputPath.length ? deepGet(item, inputPath as any) : undefined;
                                         const num = typeof val === "number" ? val : Number(val);
                                         const displayVal = Number.isFinite(num) ? String(num) : "—";
+                                        const isCurrentHighlighted = chosen === -1;
                                         return (
-                                          <span style={{ fontSize: 12, color: "#374151", padding: "1px 6px", background: "#f3f4f6", borderRadius: 6 }}>{displayVal}</span>
+                                          <span style={{ fontSize: 12, color: "#374151", padding: "1px 6px", background: isCurrentHighlighted ? "#eff6ff" : "#f3f4f6", borderRadius: 6, boxShadow: isCurrentHighlighted ? "0 0 0 2px #bfdbfe inset" : undefined }}>{displayVal}</span>
                                         );
                                       } catch {
                                         return null;
                                       }
                                     })()}
                                     {(() => {
+                                      const chosen = externalScenarioHighlightPerOption[v.id]?.[String(idx)];
                                       const presentIds = getPresentScenarioIds(v.id);
                                       const presentIdsSet = new Set<number>(presentIds);
                                       const rowIds: number[] = (templateScenarioIds[v.id] || []).slice();
@@ -1162,8 +1208,9 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                                         const incVal = presentIndex !== -1
                                           ? (pricing[v.id]?.increments?.[presentIndex] ?? 0)
                                           : (Number.isFinite(tmplInc) ? Number(tmplInc) : 0);
+                                        const isHighlighted = chosen === Number(scenarioId);
                                         return (
-                                          <span key={`subval-${idx}-${tidx}`} style={{ fontSize: 12, color: presentIdsSet.has(Number(scenarioId)) ? "#374151" : "#9ca3af", padding: "1px 6px", background: "#f3f4f6", borderRadius: 6 }}>{incVal}</span>
+                                          <span key={`subval-${idx}-${tidx}`} style={{ fontSize: 12, color: presentIdsSet.has(Number(scenarioId)) ? "#374151" : "#9ca3af", padding: "1px 6px", background: isHighlighted ? "#eff6ff" : "#f3f4f6", borderRadius: 6, boxShadow: isHighlighted ? "0 0 0 2px #bfdbfe inset" : undefined }}>{incVal}</span>
                                         );
                                       });
                                     })()}
@@ -1242,13 +1289,14 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                         const max = Math.max(...nums);
                         displayVal = min === max ? String(min) : `${min}-${max}`;
                       }
+                      const isHighlighted = Boolean(externalScenarioHighlight[v.id]?.includes(-1));
                       return (
                         <>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#6b7280", fontSize: 12 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#6b7280", fontSize: 12, background: isHighlighted ? "#eff6ff" : undefined, borderRadius: 6, padding: isHighlighted ? "2px 4px" : undefined }}>
                             <Checkbox checked disabled />
                             <span>#current</span>
                           </label>
-                          <div style={{ fontSize: 12, color: "#374151" }}>
+                          <div style={{ fontSize: 12, color: "#374151", background: isHighlighted ? "#eff6ff" : undefined, borderRadius: 6, padding: isHighlighted ? "2px 4px" : undefined }}>
                             {displayVal}
                           </div>
                           <div>
@@ -1281,16 +1329,17 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                       const priceFixVal = presentIndex !== -1
                         ? (pricing[v.id]?.priceFix?.[presentIndex] ?? 0)
                         : 0;
+                      const isHighlighted = Boolean(externalScenarioHighlight[v.id]?.includes(Number(scenarioId)));
                       return (
                         <React.Fragment key={`row-${idx}`}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: isPresentInJson ? "#6b7280" : "#9ca3af", fontSize: 12 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, color: isPresentInJson ? "#6b7280" : "#9ca3af", fontSize: 12, background: isHighlighted ? "#eff6ff" : undefined, borderRadius: 6, padding: isHighlighted ? "2px 4px" : undefined }}>
                             <Checkbox
                               checked={Boolean(scenarioEnabled[v.id]?.[idx])}
                               onChange={(e) => toggleScenarioPresence(v.id, idx, e.target.checked)}
                             />
                             <span>#{scenarioId}</span>
                           </label>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6, background: isHighlighted ? "#eff6ff" : undefined, borderRadius: 6, padding: isHighlighted ? "2px 4px" : undefined }}>
                             <InputNumber
                               size="small"
                               controls={false}
@@ -1311,7 +1360,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               style={{ width: "100%" }}
                             />
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: isPresentInJson ? 1 : 0.6, background: isHighlighted ? "#eff6ff" : undefined, borderRadius: 6, padding: isHighlighted ? "2px 4px" : undefined }}>
                             <InputNumber
                               size="small"
                               controls={false}
