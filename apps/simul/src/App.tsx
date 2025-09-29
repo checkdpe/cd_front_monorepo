@@ -52,6 +52,9 @@ export const App: React.FC = () => {
   const [queueNowTick, setQueueNowTick] = useState<number>(0);
   const [currentDoneCount, setCurrentDoneCount] = useState<number>(0);
   const [lastRefreshedDoneCount, setLastRefreshedDoneCount] = useState<number>(0);
+  // Compute runs per second as cumulative average since submit
+  const [runsPerSecond, setRunsPerSecond] = useState<number | undefined>(undefined);
+  const submitStartedAtRef = useRef<number | null>(null);
   const [resultsRefreshKey, setResultsRefreshKey] = useState<number>(0);
   const [selectedPoint, setSelectedPoint] = useState<{ index: number; ep?: number; ges?: number; cost?: number; letter?: string } | null>(null);
   const [resultsXMetric, setResultsXMetric] = useState<"index" | "cost">("index");
@@ -687,6 +690,21 @@ export const App: React.FC = () => {
       setQueueSegments(merged.length || 0);
       setCurrentDoneCount(doneList.length || 0);
 
+      // Update runs/s as cumulative average since submit
+      try {
+        const doneSegments = doneList.length || 0;
+        const startAt = submitStartedAtRef.current;
+        const chunks = Math.max(1, Number(numChunks || 1));
+        const totalComb = (typeof effectiveCombinations === "number") ? Number(effectiveCombinations) : NaN;
+        if (startAt != null && Number.isFinite(totalComb) && chunks > 0 && doneSegments >= 0) {
+          const runsPerSegment = totalComb / chunks;
+          const totalRunsDone = doneSegments * runsPerSegment;
+          const elapsedSec = Math.max(0.001, (Date.now() - startAt) / 1000);
+          const rate = totalRunsDone / elapsedSec;
+          setRunsPerSecond(Number.isFinite(rate) && rate >= 0 ? rate : undefined);
+        }
+      } catch {}
+
       // Stop polling when both running and doing queues become empty
       if ((queueList?.length || 0) === 0 && (doingList?.length || 0) === 0) {
         try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
@@ -745,6 +763,8 @@ export const App: React.FC = () => {
         },
       };
       setSubmitting(true);
+      // Start rate tracking on new submit
+      try { submitStartedAtRef.current = Date.now(); setRunsPerSecond(undefined); } catch {}
       // Only call direct_scenarios when nb chunks <= 1
       const shouldDirect = Number(numChunks || 1) <= 1;
       if (shouldDirect) {
@@ -1189,6 +1209,29 @@ export const App: React.FC = () => {
                     if (!Number.isFinite(v)) return null;
                     return Number.isInteger(v) ? v : Number(v.toFixed(2));
                   })()} runs per chunk
+                </span>
+              </div>
+            ) : null}
+            {!(typeof runsPerSecond === "number" && runsPerSecond > 0) && typeof effectiveCombinations === "number" ? (
+              <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end" }}>
+                <span style={{ color: "#6b7280", fontSize: 12 }}>
+                  {(() => {
+                    try {
+                      const workers = Math.max(1, Math.min(9, Number(numWorkers || 1)));
+                      const total = Number(effectiveCombinations);
+                      if (!Number.isFinite(total) || !Number.isFinite(workers) || workers <= 0) return null;
+                      const estSec = (total / workers) / 1.5;
+                      const shown = Number.isInteger(estSec) ? estSec : Number(estSec.toFixed(0));
+                      return `est. time: ${shown}s`;
+                    } catch { return null; }
+                  })()}
+                </span>
+              </div>
+            ) : null}
+            {typeof runsPerSecond === "number" && runsPerSecond > 0 ? (
+              <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end" }}>
+                <span style={{ color: "#16a34a", fontSize: 12, fontWeight: 600 }}>
+                  {Number.isInteger(runsPerSecond) ? runsPerSecond : Number(runsPerSecond.toFixed(2))} runs/s
                 </span>
               </div>
             ) : null}
