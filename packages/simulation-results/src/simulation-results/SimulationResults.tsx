@@ -103,6 +103,10 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
   const [xDomainOverride, setXDomainOverride] = useState<[number, number] | null>(null);
   const [yDomainOverride, setYDomainOverride] = useState<[number, number] | null>(null);
 
+  // Keep a stable reference to onPointDetail to avoid re-triggering effects
+  const onPointDetailRef = useRef<SimulationResultsProps["onPointDetail"]>();
+  useEffect(() => { onPointDetailRef.current = onPointDetail; }, [onPointDetail]);
+
   useEffect(() => {
     let cancelled = false;
     async function resolveToken() {
@@ -191,13 +195,13 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
         })
         .then((json) => {
           if (!cancelled) {
-            try { onPointDetail && onPointDetail(json); } catch {}
+            try { onPointDetailRef.current && onPointDetailRef.current(json); } catch {}
           }
         })
         .catch(() => { /* ignore */ });
     } catch {}
     return () => { cancelled = true; };
-  }, [points, selectedIndex, simul, resolvedToken, apiBaseUrl, dpeId, onPointDetail]);
+  }, [points, selectedIndex, simul, resolvedToken, apiBaseUrl, dpeId]);
 
   useEffect(() => {
     const svgEl = svgRef.current;
