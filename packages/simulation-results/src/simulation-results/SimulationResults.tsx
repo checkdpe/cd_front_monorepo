@@ -298,6 +298,44 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
 
     const brushG = g.append("g").attr("class", "brush").call(brush as any);
     try { (brushG as any).lower(); } catch {}
+
+    // Double-click anywhere on SVG to zoom in by 15% centered on cursor, without blocking brush
+    d3.select(svgEl).on("dblclick", function (event: any) {
+      try {
+        const [sx, sy] = d3.pointer(event, svgEl);
+        // convert to inner chart coordinates by removing margins
+        const mx = sx - margin.left;
+        const my = sy - margin.top;
+        if (mx < 0 || my < 0 || mx > innerWidth || my > innerHeight) return;
+        const cx = x.invert(mx);
+        const cy = y.invert(my);
+        const currentX = x.domain() as [number, number];
+        const currentY = y.domain() as [number, number];
+        const fullX = xDomain as [number, number];
+        const fullY = yDomain as [number, number];
+        const factor = 0.70; // zoom in by 30%
+
+        const newXWidth = (currentX[1] - currentX[0]) * factor;
+        const newYHeight = (currentY[1] - currentY[0]) * factor;
+
+        let x0 = cx - newXWidth / 2;
+        let x1 = cx + newXWidth / 2;
+        const minX = Math.min(fullX[0], fullX[1]);
+        const maxX = Math.max(fullX[0], fullX[1]);
+        if (x0 < minX) { x1 += (minX - x0); x0 = minX; }
+        if (x1 > maxX) { x0 -= (x1 - maxX); x1 = maxX; }
+
+        let y0 = cy - newYHeight / 2;
+        let y1 = cy + newYHeight / 2;
+        const minY = Math.min(fullY[0], fullY[1]);
+        const maxY = Math.max(fullY[0], fullY[1]);
+        if (y0 < minY) { y1 += (minY - y0); y0 = minY; }
+        if (y1 > maxY) { y0 -= (y1 - maxY); y1 = maxY; }
+
+        setXDomainOverride([x0, x1]);
+        setYDomainOverride([y0, y1]);
+      } catch {}
+    });
   }, [points, width, height, controlledXMetric, controlledYMetric, localXMetric, localYMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex, xDomainOverride, yDomainOverride, onSelectPoint, onPointDetail, apiBaseUrl, dpeId, simul, resolvedToken]);
 
   if (state.status === "loading") {
