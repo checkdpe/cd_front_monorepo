@@ -802,10 +802,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           }
           if (!Array.isArray(items) || items.length === 0) continue;
           let idxToSelect = -1;
-          if (desired === -1) {
-            // "current" -> select the only item when unambiguous (single item)
-            if (items.length === 1) idxToSelect = 0;
-          } else if (Number.isFinite(desired)) {
+          if (Number.isFinite(desired)) {
             // Try match by donnee_entree.reference
             const targetId = Number(desired);
             idxToSelect = items.findIndex((it: any) => Number((it?.donnee_entree?.reference as any)) === targetId);
@@ -846,9 +843,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
             items = (collectionObj as any[]).map((slot) => (slot && typeof slot === "object" ? slot[parsedPath.itemKey] : undefined)).filter(Boolean);
           }
           let idxToSelect = -1;
-          if (desired === -1) {
-            if (items.length === 1) idxToSelect = 0; // #current implicit single item
-          } else if (Number.isFinite(desired)) {
+          if (Number.isFinite(desired)) {
             const targetId = Number(desired);
             idxToSelect = items.findIndex((it: any) => Number((it?.donnee_entree?.reference as any)) === targetId);
           }

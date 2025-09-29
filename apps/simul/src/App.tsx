@@ -37,6 +37,7 @@ export const App: React.FC = () => {
   const [refAdeme, setRefAdeme] = useState<string | undefined>(undefined);
   const [simulLog, setSimulLog] = useState<string | undefined>(undefined);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState<boolean>(false);
+  const [isSelectionMenuOpen, setIsSelectionMenuOpen] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [resultsUrl, setResultsUrl] = useState<string | undefined>(undefined);
   const activePollAbortRef = useRef<{ cancel: () => void } | null>(null);
@@ -80,6 +81,19 @@ export const App: React.FC = () => {
   const editorOriginalTextRef = useRef<string>("");
   const combinationsAbortRef = useRef<AbortController | null>(null);
 
+  function updateUrlSelectionIndex(nextIndex?: number) {
+    try {
+      const url = new URL(window.location.href);
+      const paramName = "simul_index";
+      if (nextIndex == null || !Number.isFinite(Number(nextIndex))) {
+        url.searchParams.delete(paramName);
+      } else {
+        url.searchParams.set(paramName, String(nextIndex));
+      }
+      window.history.replaceState(null, "", url.toString());
+    } catch {}
+  }
+
   useEffect(() => {
     let isCancelled = false;
     // Listen to session bridge messages from auth app
@@ -115,6 +129,13 @@ export const App: React.FC = () => {
           setRefAdeme(ra);
           setSimulLog(sim);
         }
+        try {
+          const sidxRaw = url.searchParams.get("simul_index");
+          const sidx = sidxRaw != null ? Number(sidxRaw) : NaN;
+          if (Number.isFinite(sidx)) {
+            setSelectedPoint((prev) => (prev?.index === sidx ? prev : { index: sidx } as any));
+          }
+        } catch {}
       } catch {}
       // Immediate cookie-based fallback for username/email
       try {
@@ -624,6 +645,7 @@ export const App: React.FC = () => {
       setSelectedPoint(null);
       setSelectedPointDetail(null);
       setModifierSelection(null);
+      updateUrlSelectionIndex(undefined);
     } catch {}
   }
 
@@ -1235,7 +1257,7 @@ export const App: React.FC = () => {
                       apiBaseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
                       width={720}
                       height={300}
-                      onSelectPoint={(p) => setSelectedPoint(p)}
+                      onSelectPoint={(p) => { setSelectedPoint(p); try { updateUrlSelectionIndex((p as any)?.index); } catch {} }}
                       onPointDetail={(d) => {
                         try {
                           setSelectedPointDetail(d);
@@ -1388,28 +1410,94 @@ export const App: React.FC = () => {
       </div>
 
       {selectedPoint ? (
-        <button
-          onClick={clearSelectionMode}
-          style={{
-            position: "fixed",
-            right: 24,
-            bottom: 24,
-            appearance: "none",
-            border: "1px solid #34d399",
-            background: "#ecfdf5",
-            color: "#065f46",
-            padding: "10px 14px",
-            borderRadius: 9999,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-            boxShadow: "0 8px 24px rgba(16,185,129,0.25)",
-          }}
-          aria-label="Close selection mode"
-          title="Close selection mode"
-        >
-          Close selection mode
-        </button>
+        <div style={{ position: "fixed", right: 24, bottom: 24, display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={clearSelectionMode}
+            style={{
+              appearance: "none",
+              border: "1px solid #34d399",
+              background: "#ecfdf5",
+              color: "#065f46",
+              padding: "10px 14px",
+              borderRadius: 9999,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              boxShadow: "0 8px 24px rgba(16,185,129,0.25)",
+            }}
+            aria-label="Close selection mode"
+            title="Close selection mode"
+          >
+            Close selection mode
+          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setIsSelectionMenuOpen((v) => !v)}
+              style={{
+                appearance: "none",
+                border: "1px solid #34d399",
+                background: "#ecfdf5",
+                color: "#065f46",
+                padding: "10px 12px",
+                borderRadius: 9999,
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: "pointer",
+                boxShadow: "0 8px 24px rgba(16,185,129,0.25)",
+                lineHeight: 1,
+              }}
+              aria-label="More actions"
+              title="More actions"
+            >
+              …
+            </button>
+            {isSelectionMenuOpen && (
+              <div style={{ position: "absolute", right: 0, bottom: "100%", marginBottom: 8, background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, width: 220, boxShadow: "0 4px 14px rgba(0,0,0,0.08)", zIndex: 100 }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }}
+                  onClick={async () => {
+                    try {
+                      const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
+                      const url = new URL("/backoffice/simulation_scenario_fav", base);
+                      const pointId = (selectedPoint as any)?.id as (string | undefined);
+                      if (!refAdeme || !simulLog || !pointId) {
+                        message.error("missing data for favorite");
+                        setIsSelectionMenuOpen(false);
+                        return;
+                      }
+                      const payload = { ref_ademe: refAdeme, simul: simulLog, id: pointId } as Record<string, unknown>;
+                      // eslint-disable-next-line no-console
+                      console.debug("[simulation] POST simulation_scenario_fav", { url: url.toString(), payload });
+                      const res = await authorizedFetch(url.toString(), {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Accept: "application/json, text/plain, */*",
+                          "x-authorization": "dperdition",
+                        },
+                        body: JSON.stringify(payload),
+                      });
+                      if (!res.ok) {
+                        const txt = await res.text().catch(() => "");
+                        throw new Error(`HTTP ${res.status} ${txt}`);
+                      }
+                      message.success("Added to favorites");
+                    } catch (e) {
+                      message.error("Failed to add to favorites");
+                    } finally {
+                      setIsSelectionMenuOpen(false);
+                    }
+                  }}
+                >
+                  Add to favorites
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       ) : null}
     </div>
   );

@@ -164,6 +164,41 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
     return parseSimulationGraphData(state.data);
   }, [state]);
 
+  // When a selectedIndex is provided (e.g., via URL deep-link), automatically fetch detail
+  // so consumers receive onPointDetail and can react (e.g., highlight left panel)
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      if (!points || !Array.isArray(points) || points.length === 0) return;
+      if (typeof selectedIndex !== "number") return;
+      if (!simul || !resolvedToken) return;
+      const pt = points.find((p) => Number(p.index) === Number(selectedIndex));
+      const detailId = pt?.id as (string | undefined);
+      if (!detailId) return;
+      const url = new URL("/backoffice/simulation_graph_detail", apiBaseUrl);
+      url.searchParams.set("ref_ademe", dpeId);
+      url.searchParams.set("run_name", simul);
+      url.searchParams.set("id", detailId);
+      fetch(url.toString(), {
+        headers: {
+          Accept: "*/*",
+          Authorization: `Bearer ${resolvedToken}`,
+        },
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((json) => {
+          if (!cancelled) {
+            try { onPointDetail && onPointDetail(json); } catch {}
+          }
+        })
+        .catch(() => { /* ignore */ });
+    } catch {}
+    return () => { cancelled = true; };
+  }, [points, selectedIndex, simul, resolvedToken, apiBaseUrl, dpeId, onPointDetail]);
+
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
