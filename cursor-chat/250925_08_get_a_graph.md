@@ -1,8 +1,225 @@
+# Create simulation graph with parameters
+_Exported on 25/09/2025 at 20:24:22 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+graph from "simulation-results" to call 
+simulation_graph
+following example -> so it includes ref_ademe and run_name/simul
+https://api-dev.etiquettedpe.fr/backoffice/simulation_graph?ref_ademe=2394E0980765L&simul=dev_simul_test0002
+
+---
+
+**Cursor**
+
+I'll locate the `simulation-results` component and check how it currently fetches data, then search for any existing usage of `simulation_graph` to integrate the new API call with `ref_ademe` and `simul` parameters.
+
+I'll open the relevant files to see how `SimulationResults` is used and then update the component to call `/backoffice/simulation_graph` with `ref_ademe` and `simul`.
+
+I'll add a simul prop to `SimulationResults`, switch its fetch to `/backoffice/simulation_graph` using `ref_ademe` and `simul`, then update `apps/simul/src/App.tsx` to pass the `simul` value.
+
+I'll implement the API change in `SimulationResults` and then adjust the app to pass `simul`.
+
+I'll update `packages/simulation-results/src/simulation-results/SimulationResults.tsx` to use `/backoffice/simulation_graph` with `ref_ademe` and `simul`, then modify `apps/simul/src/App.tsx` to pass the `simul` value into `SimulationResults`.
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as d3 from "d3";
+
+export type SimulationResultsProps = {
+  dpeId: string;
+  simul?: string;
+  token?: string;
+  getAccessToken?: () => Promise<string | undefined>;
+  apiBaseUrl?: string;
+  width?: number;
+  height?: number;
+  className?: string;
+};
+
+type FetchState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "success"; data: T };
+
+function inferSeries(data: unknown): Array<{ x: number; y: number }> | null {
+  if (Array.isArray(data)) {
+    if (data.length === 0) return [];
+    const first = data[0] as unknown;
+    if (typeof first === "number") {
+      return (data as number[]).map((v, idx) => ({ x: idx, y: v }));
+    }
+    if (
+      typeof first === "object" &&
+      first !== null &&
+      ("x" in (first as Record<string, unknown>) ||
+        "y" in (first as Record<string, unknown>) ||
+        "value" in (first as Record<string, unknown>) ||
+        "date" in (first as Record<string, unknown>))
+    ) {
+      return (data as Array<Record<string, unknown>>).map((d, idx) => {
+        const xRaw = (d["x"] ?? d["date"] ?? idx) as unknown;
+        const yRaw = (d["y"] ?? d["value"] ?? 0) as unknown;
+        const x = typeof xRaw === "number" ? xRaw : idx;
+        const y = typeof yRaw === "number" ? yRaw : Number(yRaw) || 0;
+        return { x, y };
+      });
+    }
+  }
+  return null;
+}
+
+export const SimulationResults: React.FC<SimulationResultsProps> = ({
+  dpeId,
+  simul,
+  token,
+  getAccessToken,
+  apiBaseUrl = "https://api-dev.etiquettedpe.fr",
+  width = 640,
+  height = 360,
+  className,
+}) => {
+  const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveToken() {
+      if (token) {
+        setResolvedToken(token);
+        return;
+      }
+      if (getAccessToken) {
+        try {
+          const t = await getAccessToken();
+          if (!cancelled) setResolvedToken(t);
+        } catch {
+          if (!cancelled) setResolvedToken(undefined);
+        }
+      }
+    }
+    resolveToken();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, getAccessToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedToken) {
+      // wait until a token is available
+      return () => {
+        cancelled = true;
+      };
+    }
+    setState({ status: "loading" });
+    const url = new URL("/backoffice/simulation_graph", apiBaseUrl);
+    url.searchParams.set("ref_ademe", dpeId);
+    if (simul) url.searchParams.set("simul", simul);
+    fetch(url.toString(), {
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${resolvedToken}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) setState({ status: "success", data: json });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setState({ status: "error", error: (err as Error).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, dpeId, simul, resolvedToken]);
+
+  const series = useMemo(() => {
+    if (state.status !== "success") return null;
+    return inferSeries(state.data);
+  }, [state]);
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+
+    if (!series) return;
+    const margin = { top: 20, right: 20, bottom: 30, left: 40 };
+    const innerWidth = Math.max(0, width - margin.left - margin.right);
+    const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    const xDomain = d3.extent(series, (d) => d.x) as [number, number];
+    const yDomain = [0, d3.max(series, (d) => d.y) ?? 0];
+
+    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
+    const y = d3.scaleLinear().domain(yDomain).nice().range([innerHeight, 0]);
+
+    const line = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => y(d.y));
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerHeight})`)
+      .call(d3.axisBottom(x));
+    g.append("g").call(d3.axisLeft(y));
+
+    g.append("path")
+      .datum(series)
+      .attr("fill", "none")
+      .attr("stroke", "#1677ff")
+      .attr("stroke-width", 2)
+      .attr("d", line);
+  }, [series, width, height]);
+
+  if (state.status === "loading") {
+    return <div className={className}>Loading simulation results…</div>;
+  }
+  if (state.status === "error") {
+    return <div className={className}>Error: {state.error}</div>;
+  }
+
+  if (state.status === "success" && !series) {
+    return (
+      <div className={className}>
+        Unsupported data format
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(state.data, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return <svg ref={svgRef} className={className} width={width} height={height} />;
+};
+
+
+
+```
+
+I'll pass the `simul` value from `apps/simul/src/App.tsx` into `SimulationResults`, then run a linter check on the two edited files and fix any issues.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
 import { Hub } from "aws-amplify/utils";
-import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse, Tooltip, Switch } from "antd";
+import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse, Tooltip } from "antd";
 import { ExportOutlined, LeftOutlined } from "@ant-design/icons";
 import { SimulationScenariosModal } from "@acme/simulation-scenarios";
 import { LoadScenarioModal } from "@acme/load-scenario";
@@ -12,7 +229,6 @@ import { ChainlitChatDrawer } from "@acme/chainlit-client";
 import { TopMenu } from "@acme/top-menu";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 import { flushSync } from "react-dom";
-import { SimulationDetailCard } from "@acme/simulation-detail";
 
 const { Title, Paragraph } = Typography;
 
@@ -24,7 +240,6 @@ export const App: React.FC = () => {
   const [limit, setLimit] = useState<number>(10);
   const [numChunks, setNumChunks] = useState<number>(1);
   useEffect(() => { setNumChunks(2); }, []);
-  const [totalCombinations, setTotalCombinations] = useState<number | undefined>(undefined);
   const [numWorkers, setNumWorkers] = useState<number>(1);
   const [confirmedWorkers, setConfirmedWorkers] = useState<number | undefined>(undefined);
   const [workersError, setWorkersError] = useState<string | undefined>(undefined);
@@ -49,36 +264,9 @@ export const App: React.FC = () => {
   const [queueItems, setQueueItems] = useState<any[]>([]);
   const queuePollIdRef = useRef<number | null>(null);
   const [queueNowTick, setQueueNowTick] = useState<number>(0);
-  const [currentDoneCount, setCurrentDoneCount] = useState<number>(0);
-  const [lastRefreshedDoneCount, setLastRefreshedDoneCount] = useState<number>(0);
-  const [resultsRefreshKey, setResultsRefreshKey] = useState<number>(0);
-  const [selectedPoint, setSelectedPoint] = useState<{ index: number; ep?: number; ges?: number; cost?: number; letter?: string } | null>(null);
-  const [resultsXMetric, setResultsXMetric] = useState<"index" | "cost">("index");
-  const [resultsYMetric, setResultsYMetric] = useState<"ep" | "ges">("ep");
-  const [selectedPointDetail, setSelectedPointDetail] = useState<any | null>(null);
-  const [modifierSelection, setModifierSelection] = useState<{ path: string; seq: number[] }[] | null>(null);
-  const [expertMode, setExpertMode] = useState<boolean>(false);
-  const [overrideCombinations, setOverrideCombinations] = useState<number | undefined>(undefined);
-  const isChunksTooBig = useMemo(() => {
-    if (typeof totalCombinations !== "number") return false;
-    const chunks = Math.max(1, Number(numChunks || 1));
-    return (totalCombinations / chunks) > 50;
-  }, [totalCombinations, numChunks]);
-  const effectiveCombinations = useMemo(() => {
-    try {
-      if (overrideCombinations != null) {
-        const n = Number(overrideCombinations);
-        return Number.isFinite(n) ? n : undefined;
-      }
-      return typeof totalCombinations === "number" ? totalCombinations : undefined;
-    } catch {
-      return undefined;
-    }
-  }, [overrideCombinations, totalCombinations]);
   function openEditor() { setIsEditorOpen(true); }
   const hasLoadedTemplateRef = useRef<boolean>(false);
   const editorOriginalTextRef = useRef<string>("");
-  const combinationsAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -440,52 +628,6 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // If no Cognito token becomes available shortly after load, redirect to sign-in
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = await waitForAccessToken(5000, 250);
-        if (cancelled) return;
-        if (token) return; // already authenticated
-        // Compute auth URL similarly to TopMenu.authHref
-        const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
-        const buildAuthBase = () => {
-          if (configured) {
-            try {
-              const configuredUrl = new URL(configured);
-              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
-              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-              if (isConfiguredLocal && !isPageLocal) {
-                // ignore local auth URL on non-localhost pages
-              } else {
-                if (!isConfiguredLocal) {
-                  const pathname = configuredUrl.pathname || "/";
-                  const endsWithHtml = /\.html$/i.test(pathname);
-                  const hasTrailingSlash = /\/$/.test(pathname);
-                  if (!endsWithHtml) {
-                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
-                    return base + "/index.html";
-                  }
-                }
-                return configured;
-              }
-            } catch {
-              return configured;
-            }
-          }
-          if (window.location.hostname === "localhost") return "http://localhost:5173";
-          return "/auth/index.html";
-        };
-        const authBase = buildAuthBase();
-        const sep = authBase.includes("?") ? "&" : "?";
-        const target = `${authBase}${sep}returnTo=${encodeURIComponent(window.location.href)}`;
-        window.location.href = target;
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
   // Capture the JSON snapshot when opening the editor to detect unconfirmed changes
   useEffect(() => {
     try {
@@ -494,49 +636,6 @@ export const App: React.FC = () => {
       }
     } catch {}
   }, [isEditorOpen]);
-
-  // Compute combinations count based on current JSON, ref_ademe and simul
-  useEffect(() => {
-    try { combinationsAbortRef.current?.abort(); } catch {}
-    const simulName = (simulLog || (import.meta.env.VITE_BACKOFFICE_LOG as string) || "dev_report_o3cl");
-    if (!refAdeme || !simulName) { setTotalCombinations(undefined); return; }
-    // Validate and parse JSON before calling
-    let parsedSimul: unknown = {};
-    try { parsedSimul = jsonText.trim() ? JSON.parse(jsonText) : {}; } catch { setTotalCombinations(undefined); return; }
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      if (cancelled) return;
-      try {
-        const base = (import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr";
-        const url = new URL("/backoffice/simulation_count", base);
-        url.searchParams.set("ref_ademe", String(refAdeme));
-        url.searchParams.set("simul", String(simulName));
-        const controller = new AbortController();
-        combinationsAbortRef.current = controller;
-        const res = await authorizedFetch(url.toString(), {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "x-authorization": "dperdition",
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
-          body: JSON.stringify({ ref_ademe: refAdeme, simul: simulName, simul_content: parsedSimul }),
-          signal: controller.signal,
-        });
-        if (!res.ok) { setTotalCombinations(undefined); return; }
-        const data: any = await res.json().catch(() => null);
-        const value = Number(((data && data.data && data.data.total_combinations) ?? (data && data.total_combinations)) as any);
-        if (Number.isFinite(value)) setTotalCombinations(value); else setTotalCombinations(undefined);
-      } catch {
-        setTotalCombinations(undefined);
-      }
-    }, 600);
-    return () => { cancelled = true; try { window.clearTimeout(timer); } catch {}; };
-  }, [refAdeme, simulLog, jsonText]);
-
-  // (removed nbCombinations UI; we rely on dynamically computed totalCombinations)
 
   // Submit is always enabled now
 
@@ -627,16 +726,12 @@ export const App: React.FC = () => {
       const urlQueue = new URL("/backoffice/get_redis_detail", base);
       urlQueue.searchParams.set("ref_ademe", String(refAdeme || ""));
       urlQueue.searchParams.set("log", `${simulName}_o3cl_queue`);
-      const urlDoing = new URL("/backoffice/get_redis_detail", base);
-      urlDoing.searchParams.set("ref_ademe", String(refAdeme || ""));
-      urlDoing.searchParams.set("log", `${simulName}_o3cl_doing_queue`);
       const urlDone = new URL("/backoffice/get_redis_detail", base);
       urlDone.searchParams.set("ref_ademe", String(refAdeme || ""));
       urlDone.searchParams.set("log", `${simulName}_o3cl_done_queue`);
 
-      const [qres, doingRes, dres] = await Promise.all([
+      const [qres, dres] = await Promise.all([
         authorizedFetch(urlQueue.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
-        authorizedFetch(urlDoing.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
         authorizedFetch(urlDone.toString(), { method: "GET", headers: { Accept: "application/json, text/plain, */*", "x-authorization": "dperdition", "Cache-Control": "no-cache", Pragma: "no-cache" } }),
       ]);
 
@@ -649,39 +744,22 @@ export const App: React.FC = () => {
         return [];
       };
 
-      const [queueList, doingListRaw, doneListRaw] = await Promise.all([parseItems(qres), parseItems(doingRes), parseItems(dres)]);
-      const doingList = (doingListRaw || []).map((it: any) => ({ ...it, status: 1, __kind: "doing" }));
-      const doneList = (doneListRaw || []).map((it: any) => ({ ...it, status: 2, __kind: "done" }));
-      const merged = [...doneList, ...doingList, ...queueList];
+      const [queueList, doneListRaw] = await Promise.all([parseItems(qres), parseItems(dres)]);
+      const doneList = (doneListRaw || []).map((it: any) => ({ ...it, status: 1 }));
+      const merged = [...doneList, ...queueList];
       setQueueItems(merged);
       setQueueSegments(merged.length || 0);
-      setCurrentDoneCount(doneList.length || 0);
-
-      // Stop polling when both running and doing queues become empty
-      if ((queueList?.length || 0) === 0 && (doingList?.length || 0) === 0) {
-        try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
-      }
     } catch {}
   }
 
-  function startQueuePolling(opts?: { skipImmediate?: boolean }) {
+  function startQueuePolling() {
     try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
+    void fetchQueueOnce();
     const raw = (import.meta as any)?.env?.VITE_POLL_QUEUE_DELAY;
     const n = Number(raw);
-    const delayMs = Number.isFinite(n) && n > 0 ? n : 5000;
-    if (!opts?.skipImmediate) { void fetchQueueOnce(); }
+    const delayMs = Number.isFinite(n) && n > 0 ? n : 30000;
     const id = window.setInterval(fetchQueueOnce, delayMs);
     queuePollIdRef.current = id;
-  }
-
-  function handleRefreshProgress() {
-    try { if (queuePollIdRef.current != null) { window.clearInterval(queuePollIdRef.current); queuePollIdRef.current = null; } } catch {}
-    const raw = (import.meta as any)?.env?.VITE_POLL_QUEUE_DELAY;
-    const n = Number(raw);
-    const delayMs = Number.isFinite(n) && n > 0 ? n : 5000;
-    void fetchQueueOnce();
-    window.setTimeout(() => { void fetchQueueOnce(); }, delayMs);
-    window.setTimeout(() => { void fetchQueueOnce(); }, delayMs * 2);
   }
 
   useEffect(() => {
@@ -699,46 +777,39 @@ export const App: React.FC = () => {
   async function handleSubmit() {
     try {
       const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-      const baseQuery: Record<string, unknown> = { ref_ademe: refAdeme };
-      if (expertMode && apiDebug != null) baseQuery.api_debug = Boolean(apiDebug);
-      if (expertMode) { baseQuery.skip = skip; baseQuery.limit = limit; }
+      const baseQuery = {
+        api_debug: Boolean(apiDebug),
+        skip,
+        limit,
+        ref_ademe: refAdeme,
+      } as Record<string, unknown>;
       const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
       const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
-      const nbCombinationsToSend = Number(((overrideCombinations != null) ? overrideCombinations : totalCombinations) || 0);
       const body = {
         redis_db: 1,
         task: "tasks.ext_o3cl_managing.direct_scenarios",
         args: {
           ref_ademe: refAdeme,
-          nb_combinations: nbCombinationsToSend,
           query,
         },
       };
       setSubmitting(true);
-      // Only call direct_scenarios when nb chunks <= 1
-      const shouldDirect = Number(numChunks || 1) <= 1;
-      if (shouldDirect) {
-        // Use plain fetch to avoid adding Authorization header
-        const res = await fetch(lambdaUrl, {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const txt = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status} ${txt}`);
-        }
-        message.success("Submitted simulation");
-        // eslint-disable-next-line no-console
-        console.log("simulation payload", body);
+      // Use plain fetch to avoid adding Authorization header
+      const res = await fetch(lambdaUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
       }
+      message.success("Submitted simulation");
       try { activePollAbortRef.current?.cancel(); } catch {}
       setIsPolling(false);
-      // After submit, start polling only the queue/done endpoints. Delay first hit to avoid hitting on first tick.
-      startQueuePolling({ skipImmediate: true });
       // If nb chunks > 1, also call append_scenarios
       if (Number(numChunks || 1) > 1) {
         const appendBody = {
@@ -748,8 +819,8 @@ export const App: React.FC = () => {
             run_name: simulLog || "dev_report_o3cl",
             ref_ademe: refAdeme,
             nb_chunks: Number(numChunks || 1),
-            nb_workers: Math.min(100, Number(numWorkers || 1)),
-            nb_combinations: nbCombinationsToSend,
+            nb_workers: Number(numWorkers || 1),
+            nb_combination: 100,
             query,
           },
         } as Record<string, unknown>;
@@ -769,10 +840,15 @@ export const App: React.FC = () => {
           message.success(`appending scenarios across ${Number(numChunks)} chunks`);
           // eslint-disable-next-line no-console
           console.debug("append_scenarios payload", appendBody);
+
+          // Start queue polling for segmented progress
+          startQueuePolling();
         } catch (e) {
           message.error("Failed to append scenarios");
         }
       }
+      // eslint-disable-next-line no-console
+      console.log("simulation payload", body);
     } catch (err) {
       message.error("Invalid JSON");
     } finally {
@@ -782,8 +858,13 @@ export const App: React.FC = () => {
 
   function handleConfirmWorkers() {
     const value = Number(numWorkers || 0);
-    if (value > 100) {
-      setWorkersError("nb workers should be <= 100");
+    if (value > 10) {
+      setWorkersError("Max 10 workers");
+      setConfirmedWorkers(undefined);
+      return;
+    }
+    if (value < 1) {
+      setWorkersError("Min 1 worker");
       setConfirmedWorkers(undefined);
       return;
     }
@@ -911,7 +992,6 @@ export const App: React.FC = () => {
                   setJsonText((prev) => (prev?.trim() ? prev : text));
                 } catch {}
               }}
-                modifierSelection={modifierSelection}
               onHighlightJsonPath={({ collection, itemKey, indices }) => {
                 try {
                   const ta = textAreaRef.current;
@@ -1004,70 +1084,44 @@ export const App: React.FC = () => {
                 items={[
                   {
                     key: "options",
-                    label: (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span>Options</span>
-                        {typeof totalCombinations === "number" ? (
-                          <strong style={{ fontWeight: 600 }}>combinations: {totalCombinations}</strong>
-                        ) : null}
-                        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()}>
-                          <span style={{ color: "#6b7280", fontSize: 12 }}>Expert</span>
-                          <Switch size="small" checked={expertMode} onChange={setExpertMode} />
-                        </div>
-                      </div>
-                    ),
+                    label: "Options",
                     children: (
                       <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                        {expertMode ? (
-                          <>
-                            <div>
-                              <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
-                              <Select
-                                value={apiDebug as number | undefined}
-                                onChange={(v) => setApiDebug(v)}
-                                allowClear
-                                placeholder="none"
-                                options={apiDebugOptions}
-                                style={{ width: "100%" }}
-                              />
-                            </div>
-                            <div>
-                              <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
-                              <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
-                            </div>
-                            <div>
-                              <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
-                              <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
-                            </div>
-                          </>
-                        ) : null}
-                        
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>api_debug</div>
+                          <Select
+                            value={apiDebug as number | undefined}
+                            onChange={(v) => setApiDebug(v)}
+                            allowClear
+                            placeholder="none"
+                            options={apiDebugOptions}
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>skip</div>
+                          <InputNumber value={skip} onChange={(v) => setSkip(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 6, color: "#4b5563" }}>limit</div>
+                          <InputNumber value={limit} onChange={(v) => setLimit(Number(v ?? 0))} style={{ width: "100%" }} min={0} />
+                        </div>
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb chunks</div>
                           <InputNumber value={numChunks} onChange={(v) => setNumChunks(Number(v ?? 1))} style={{ width: "100%" }} min={1} />
                         </div>
                         <div>
                           <div style={{ marginBottom: 6, color: "#4b5563" }}>nb workers</div>
-                          {expertMode ? (
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                              <InputNumber value={numWorkers} onChange={(v) => setNumWorkers(Number(v ?? 1))} style={{ width: 140 }} min={1} max={100} />
-                              <Button size="small" onClick={handleConfirmWorkers}>apply</Button>
-                              {workersError ? <span style={{ color: "#ef4444", fontSize: 12 }}>{workersError}</span> : (confirmedWorkers ? <span style={{ color: "#16a34a", fontSize: 12 }}>applied: {confirmedWorkers}</span> : null)}
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                              <InputNumber value={1} disabled style={{ width: 140 }} min={1} />
-                              <span style={{ color: "#6b7280", fontSize: 12 }}>(read-only)</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <div style={{ marginBottom: 6, color: "#4b5563" }}>combinations override</div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <InputNumber value={overrideCombinations as number | null as any} onChange={(v) => setOverrideCombinations(v == null ? undefined : Number(v))} style={{ width: 180 }} min={0} placeholder={typeof totalCombinations === "number" ? String(totalCombinations) : undefined} />
-                            <span style={{ color: "#6b7280", fontSize: 12 }}>leave empty to use computed</span>
+                            <InputNumber value={numWorkers} onChange={(v) => { setWorkersError(undefined); setNumWorkers(Number(v ?? 1)); }} style={{ width: 140 }} min={1} />
+                            <Button size="small" onClick={handleConfirmWorkers}>ok</Button>
+                            {typeof confirmedWorkers === "number" && (
+                              <span style={{ color: "#059669", fontSize: 12 }}>saved: {confirmedWorkers}</span>
+                            )}
                           </div>
+                          {workersError && (
+                            <div style={{ marginTop: 4, color: "#ef4444", fontSize: 12 }}>{workersError}</div>
+                          )}
                         </div>
                       </Space>
                     ),
@@ -1077,11 +1131,9 @@ export const App: React.FC = () => {
             </div>
               <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                <Tooltip title={isChunksTooBig ? "chunks too big (max.50)" : undefined}>
-                  <span style={{ display: "inline-block" }}>
-                    <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isChunksTooBig}>submit</Button>
-                  </span>
-                </Tooltip>
+                <span style={{ display: "inline-block" }}>
+                  <Button type="primary" onClick={handleSubmit} loading={submitting}>submit</Button>
+                </span>
                 <div style={{ position: "relative" }}>
                   <Button onClick={() => setIsSaveMenuOpen((v) => !v)}>...</Button>
                   {isSaveMenuOpen && (
@@ -1140,24 +1192,11 @@ export const App: React.FC = () => {
                         setIsSaveMenuOpen(false);
                       }
                     }}>save as…</div>
-                    <div style={{ height: 1, background: "#e5e7eb", margin: "6px 0" }} />
-                    <div style={{ padding: "6px 8px", cursor: "pointer", borderRadius: 6 }} onClick={() => { handleRefreshProgress(); setIsSaveMenuOpen(false); }}>refresh progress</div>
                     </div>
                   )}
                 </div>
               </div>
-            {(Number(numChunks || 1) > 1 && typeof effectiveCombinations === "number") ? (
-              <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-                <span style={{ color: "#6b7280", fontSize: 12 }}>
-                  {(() => {
-                    const v = Number(effectiveCombinations) / Number(numChunks || 1);
-                    if (!Number.isFinite(v)) return null;
-                    return Number.isInteger(v) ? v : Number(v.toFixed(2));
-                  })()} runs per chunk
-                </span>
-              </div>
-            ) : null}
-            {queueSegments > 0 && (
+              {queueSegments > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ height: 10, background: "#e5e7eb", borderRadius: 8, overflow: "hidden", display: "flex" }}>
                     {(queueItems.length ? queueItems : Array.from({ length: queueSegments })).map((item: any, idx: number) => {
@@ -1175,8 +1214,8 @@ export const App: React.FC = () => {
                       } catch {}
                       const elapsedSec = Math.max(0, (Date.now() - startedAtMs) / 1000);
                       const statusNum = Number(item?.status ?? 0);
-                      const pct = statusNum >= 2 ? 100 : Math.max(0, Math.min(100, (elapsedSec / 60) * 100));
-                      const fillColor = statusNum >= 2 ? "#22c55e" : (statusNum >= 1 ? "#93c5fd" : "transparent");
+                      const pct = statusNum === 1 ? 100 : Math.max(0, Math.min(100, (elapsedSec / 60) * 100));
+                      const fillColor = statusNum === 1 ? "#93c5fd" : "transparent";
                       return (
                         <div key={idx} style={{ flex: 1, display: "flex" }}>
                           <div style={{ width: `${pct}%`, background: fillColor, transition: "width 1s linear" }} />
@@ -1203,105 +1242,16 @@ export const App: React.FC = () => {
                 <div style={{ marginTop: 20 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
                     <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Results preview</Title>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        setLastRefreshedDoneCount(currentDoneCount);
-                        setResultsRefreshKey((k) => k + 1);
-                      }}
-                    >
-                      refresh
-                    </Button>
                   </div>
                   <Card style={{ background: "#ffffff", borderColor: "#e5e7eb" }} styles={{ body: { padding: 16 } }}>
                     <SimulationResults
-                      key={resultsRefreshKey}
                       dpeId={refAdeme}
                       simul={simulLog}
                       getAccessToken={async () => (await getAccessToken()) || undefined}
                       apiBaseUrl={(import.meta.env.VITE_BACKOFFICE_API_URL as string) || "https://api-dev.etiquettedpe.fr"}
                       width={720}
                       height={300}
-                      onSelectPoint={(p) => setSelectedPoint(p)}
-                      onPointDetail={(d) => {
-                        try {
-                          setSelectedPointDetail(d);
-                          // Extract modifierId array from detail response (support both direct and within redis_obj)
-                          let root: any = d;
-                          const rawRedis = (d && (d as any).redis_obj) as unknown;
-                          if (typeof rawRedis === "string") {
-                            try { root = JSON.parse(rawRedis); } catch { root = d; }
-                          } else if (rawRedis && typeof rawRedis === "object") {
-                            root = rawRedis;
-                          }
-                          const resultArr: any[] = Array.isArray(root?.data?.result) ? root.data.result : (Array.isArray(root?.result) ? root.result : []);
-                          const first = (resultArr && resultArr.length) ? resultArr[0] : root;
-                          const mod = (first && (first.modifierId || first.modifier_id || first.modifier)) as any;
-                          const arr = Array.isArray(mod) ? mod : [];
-                          const normalized = arr
-                            .map((it: any) => ({ path: String(it?.path || ""), seq: Array.isArray(it?.seq) ? (it.seq as any[]).map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [] }))
-                            .filter((it: any) => it.path && it.seq && it.seq.length);
-                          setModifierSelection(normalized.length ? normalized : null);
-                        } catch {
-                          setModifierSelection(null);
-                        }
-                      }}
-                      selectedIndex={selectedPoint?.index}
-                      primaryColor="#1677ff"
-                      xMetric={resultsXMetric}
-                      yMetric={resultsYMetric}
-                      onXMetricChange={setResultsXMetric}
-                      onYMetricChange={setResultsYMetric}
-                      mapColorDpe={{
-                        A: "#189c44",
-                        B: "#4FAA05",
-                        C: "#CCD600",
-                        D: "#FFEE6C",
-                        E: "#FFC661",
-                        F: "#FF8300",
-                        G: "#FF3238",
-                      }}
                     />
-                    <div style={{ marginTop: 12 }}>
-                      <SimulationDetailCard point={selectedPoint || undefined} mapColorDpe={{
-                        A: "#189c44",
-                        B: "#4FAA05",
-                        C: "#CCD600",
-                        D: "#FFEE6C",
-                        E: "#FFC661",
-                        F: "#FF8300",
-                        G: "#FF3238",
-                      }} />
-                      {(() => {
-                        try {
-                          const raw = (selectedPointDetail && (selectedPointDetail as any).redis_obj) as unknown;
-                          if (raw == null) return null;
-                          let root: any = null;
-                          if (typeof raw === "string") {
-                            try { root = JSON.parse(raw); } catch { root = null; }
-                          } else if (typeof raw === "object") {
-                            root = raw;
-                          }
-                          if (!root || typeof root !== "object") return null;
-                          const resultArr: any[] = Array.isArray((root as any)?.data?.result) ? (root as any).data.result : (Array.isArray((root as any)?.result) ? (root as any).result : []);
-                          const targetId = (selectedPoint as any)?.id as (string | undefined);
-                          const item = (Array.isArray(resultArr) && resultArr.length)
-                            ? (resultArr.find((it: any) => String(it?.id || "") === String(targetId || "")) || resultArr[0])
-                            : root;
-                          const mod = item ? (item.modifierId || item.modifier_id || item.modifier) : undefined;
-                          if (!mod) return null;
-                          const pretty = JSON.stringify(mod, null, 2);
-                          return (
-                            <div style={{ marginTop: 12 }}>
-                              <div style={{ color: "#4b5563", marginBottom: 6 }}>modifierId</div>
-                              <pre style={{ margin: 0, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
-{pretty}
-                              </pre>
-                            </div>
-                          );
-                        } catch { return null; }
-                      })()}
-                    </div>
                   </Card>
                 </div>
               ) : null}
@@ -1377,4 +1327,728 @@ export const App: React.FC = () => {
   );
 };
 
+
+
+```
+
+I updated `SimulationResults` to call the new endpoint and wired the `simul` parameter from the app.
+
+- Implemented: `packages/simulation-results/src/simulation-results/SimulationResults.tsx`
+  - Added `simul?: string` prop.
+  - Switched request to `/backoffice/simulation_graph`.
+  - Sends `ref_ademe` (from `dpeId`) and optional `simul`.
+  - Kept token resolution and D3 rendering intact.
+
+- Integrated: `apps/simul/src/App.tsx`
+  - Passes `simul={simulLog}` to `SimulationResults`.
+
+All lints are clean.
+
+Done.
+
+---
+
+**User**
+
+considering that some result would be like 
+
+{
+  "data": [
+    {
+      "redis_key": "2508E0243162W:dev_simul_test0002-0_o3cl_report",
+      "id": "2508E0243162W-0",
+      ],
+      "cost": 0,
+      "result": {
+        "ep_conso_5_usages_m2": 155,
+        "emission_ges_5_usages_m2": 5,
+        "bilan_dpe_letter": "C",
+        "emission_ges_letter": "A"
+      }
+    },
+...
+
+
+
+would you offer data to be displayed on the graph : 
+cost, ep_conso_5_usages_m2, emission_ges_5_usages_m2
+and also index in the array
+while bilan_dpe_letter appears as the dot result?
+
+---
+
+**Cursor**
+
+I'll implement support in `SimulationResults` to parse the new `simulation_graph` response, plot ep/ges on the left axis, cost on a right axis, use index for x, and render the `bilan_dpe_letter` as labels on the ep markers. Then I'll run lints.
+
+I'll parse the simulation_graph response into structured points (index, ep, ges, cost, letter), then render a multi-series D3 chart with left axis for ep/ges, right axis for cost, index on x, and show the DPE letter as labels on ep markers. Now applying the edits.
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as d3 from "d3";
+
+export type SimulationResultsProps = {
+  dpeId: string;
+  simul?: string;
+  token?: string;
+  getAccessToken?: () => Promise<string | undefined>;
+  apiBaseUrl?: string;
+  width?: number;
+  height?: number;
+  className?: string;
+};
+
+type FetchState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "success"; data: T };
+
+type ChartPoint = {
+  index: number;
+  ep?: number;
+  ges?: number;
+  cost?: number;
+  letter?: string;
+};
+
+function parseSimulationGraphData(payload: unknown): ChartPoint[] | null {
+  try {
+    // Expecting { data: [ { cost, result: { ep_conso_5_usages_m2, emission_ges_5_usages_m2, bilan_dpe_letter } }, ... ] }
+    if (!payload || typeof payload !== "object") return null;
+    const root = payload as any;
+    const arr: any[] = Array.isArray(root?.data) ? root.data : (Array.isArray(root) ? root : []);
+    if (!Array.isArray(arr)) return null;
+    const points: ChartPoint[] = arr.map((item: any, idx: number) => {
+      const res = item?.result || {};
+      const ep = Number(res?.ep_conso_5_usages_m2);
+      const ges = Number(res?.emission_ges_5_usages_m2);
+      const cost = Number(item?.cost ?? res?.cost);
+      const letter = (res?.bilan_dpe_letter as string | undefined) || undefined;
+      const p: ChartPoint = { index: idx };
+      if (Number.isFinite(ep)) p.ep = ep;
+      if (Number.isFinite(ges)) p.ges = ges;
+      if (Number.isFinite(cost)) p.cost = cost;
+      if (letter && typeof letter === "string") p.letter = letter;
+      return p;
+    });
+    return points;
+  } catch {
+    return null;
+  }
+}
+
+export const SimulationResults: React.FC<SimulationResultsProps> = ({
+  dpeId,
+  simul,
+  token,
+  getAccessToken,
+  apiBaseUrl = "https://api-dev.etiquettedpe.fr",
+  width = 640,
+  height = 360,
+  className,
+}) => {
+  const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveToken() {
+      if (token) {
+        setResolvedToken(token);
+        return;
+      }
+      if (getAccessToken) {
+        try {
+          const t = await getAccessToken();
+          if (!cancelled) setResolvedToken(t);
+        } catch {
+          if (!cancelled) setResolvedToken(undefined);
+        }
+      }
+    }
+    resolveToken();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, getAccessToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedToken) {
+      // wait until a token is available
+      return () => {
+        cancelled = true;
+      };
+    }
+    setState({ status: "loading" });
+    const url = new URL("/backoffice/simulation_graph", apiBaseUrl);
+    url.searchParams.set("ref_ademe", dpeId);
+    if (simul) url.searchParams.set("simul", simul);
+    fetch(url.toString(), {
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${resolvedToken}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) setState({ status: "success", data: json });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setState({ status: "error", error: (err as Error).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, dpeId, simul, resolvedToken]);
+
+  const points = useMemo(() => {
+    if (state.status !== "success") return null;
+    return parseSimulationGraphData(state.data);
+  }, [state]);
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+
+    if (!points || points.length === 0) return;
+    const margin = { top: 20, right: 40, bottom: 30, left: 48 };
+    const innerWidth = Math.max(0, width - margin.left - margin.right);
+    const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    const xDomain: [number, number] = [0, Math.max(0, (points.length - 1))];
+    const epMax = d3.max(points, (p) => Number(p.ep ?? 0)) ?? 0;
+    const gesMax = d3.max(points, (p) => Number(p.ges ?? 0)) ?? 0;
+    const leftMax = Math.max(epMax, gesMax, 0);
+    const costMax = d3.max(points, (p) => Number(p.cost ?? 0)) ?? 0;
+
+    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
+    const yLeft = d3.scaleLinear().domain([0, leftMax]).nice().range([innerHeight, 0]);
+    const yRight = d3.scaleLinear().domain([0, costMax]).nice().range([innerHeight, 0]);
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerHeight})`)
+      .call(d3.axisBottom(x).ticks(Math.min(points.length, 10)).tickFormat((v) => String(v)));
+    g.append("g").call(d3.axisLeft(yLeft));
+    g.append("g")
+      .attr("transform", `translate(${innerWidth},0)`) 
+      .call(d3.axisRight(yRight));
+
+    const epSeries = points.filter((p) => Number.isFinite(p.ep)).map((p) => ({ x: p.index, y: Number(p.ep) }));
+    const gesSeries = points.filter((p) => Number.isFinite(p.ges)).map((p) => ({ x: p.index, y: Number(p.ges) }));
+    const costSeries = points.filter((p) => Number.isFinite(p.cost)).map((p) => ({ x: p.index, y: Number(p.cost) }));
+
+    const lineLeft = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yLeft(d.y));
+
+    const lineRight = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yRight(d.y));
+
+    if (epSeries.length > 0) {
+      g.append("path")
+        .datum(epSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#1677ff")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+
+      // EP markers with letter labels
+      const epGroup = g.append("g");
+      epGroup
+        .selectAll("circle.ep")
+        .data(points.filter((p) => Number.isFinite(p.ep)))
+        .enter()
+        .append("circle")
+        .attr("class", "ep")
+        .attr("cx", (p) => x(p.index))
+        .attr("cy", (p) => yLeft(Number(p.ep)))
+        .attr("r", 3.5)
+        .attr("fill", "#1677ff");
+
+      epGroup
+        .selectAll("text.letter")
+        .data(points.filter((p) => Number.isFinite(p.ep) && p.letter))
+        .enter()
+        .append("text")
+        .attr("class", "letter")
+        .attr("x", (p) => x(p.index) + 6)
+        .attr("y", (p) => yLeft(Number(p.ep)) - 6)
+        .attr("font-size", 10)
+        .attr("fill", "#111827")
+        .text((p) => String(p.letter));
+    }
+
+    if (gesSeries.length > 0) {
+      g.append("path")
+        .datum(gesSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#10b981")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+    }
+
+    if (costSeries.length > 0) {
+      g.append("path")
+        .datum(costSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#f59e0b")
+        .attr("stroke-width", 2)
+        .attr("d", lineRight);
+    }
+  }, [series, width, height]);
+
+  if (state.status === "loading") {
+    return <div className={className}>Loading simulation results…</div>;
+  }
+  if (state.status === "error") {
+    return <div className={className}>Error: {state.error}</div>;
+  }
+
+  if (state.status === "success" && !points) {
+    return (
+      <div className={className}>
+        Unsupported data format
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(state.data, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return <svg ref={svgRef} className={className} width={width} height={height} />;
+};
+
+
+
+```
+
+- Yes: I now parse `data[]` items and extract index, cost, ep_conso_5_usages_m2 (ep), emission_ges_5_usages_m2 (ges), and bilan_dpe_letter (letter).
+- The chart shows:
+  - x: index
+  - y-left: ep (blue), ges (green)
+  - y-right: cost (orange)
+  - ep points display `bilan_dpe_letter` as small labels next to the dots.
+
+If you want different series colors, labels on ges too, or tooltips, say the word.
+
+---
+
+**User**
+
+SimulationResults.tsx:229 Uncaught ReferenceError: series is not defined
+    at SimulationResults (SimulationResults.tsx:229:7)
+    at renderWithHooks (chunk-FDCL5M4P.js?v=a5826b93:11548:26)
+    at mountIndeterminateComponent (chunk-FDCL5M4P.js?v=a5826b93:14926:21)
+    at beginWork (chunk-FDCL5M4P.js?v=a5826b93:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-FDCL5M4P.js?v=a5826b93:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-FDCL5M4P.js?v=a5826b93:3699:24)
+    at invokeGuardedCallback (chunk-FDCL5M4P.js?v=a5826b93:3733:39)
+    at beginWork$1 (chunk-FDCL5M4P.js?v=a5826b93:19765:15)
+    at performUnitOfWork (chunk-FDCL5M4P.js?v=a5826b93:19198:20)
+    at workLoopSync (chunk-FDCL5M4P.js?v=a5826b93:19137:13)
+SimulationResults @ SimulationResults.tsx:229
+renderWithHooks @ chunk-FDCL5M4P.js?v=a5826b93:11548
+mountIndeterminateComponent @ chunk-FDCL5M4P.js?v=a5826b93:14926
+beginWork @ chunk-FDCL5M4P.js?v=a5826b93:15914
+callCallback2 @ chunk-FDCL5M4P.js?v=a5826b93:3674
+invokeGuardedCallbackDev @ chunk-FDCL5M4P.js?v=a5826b93:3699
+invokeGuardedCallback @ chunk-FDCL5M4P.js?v=a5826b93:3733
+beginWork$1 @ chunk-FDCL5M4P.js?v=a5826b93:19765
+performUnitOfWork @ chunk-FDCL5M4P.js?v=a5826b93:19198
+workLoopSync @ chunk-FDCL5M4P.js?v=a5826b93:19137
+renderRootSync @ chunk-FDCL5M4P.js?v=a5826b93:19116
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18678
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+SimulationResults.tsx:229 Uncaught ReferenceError: series is not defined
+    at SimulationResults (SimulationResults.tsx:229:7)
+    at renderWithHooks (chunk-FDCL5M4P.js?v=a5826b93:11548:26)
+    at mountIndeterminateComponent (chunk-FDCL5M4P.js?v=a5826b93:14926:21)
+    at beginWork (chunk-FDCL5M4P.js?v=a5826b93:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-FDCL5M4P.js?v=a5826b93:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-FDCL5M4P.js?v=a5826b93:3699:24)
+    at invokeGuardedCallback (chunk-FDCL5M4P.js?v=a5826b93:3733:39)
+    at beginWork$1 (chunk-FDCL5M4P.js?v=a5826b93:19765:15)
+    at performUnitOfWork (chunk-FDCL5M4P.js?v=a5826b93:19198:20)
+    at workLoopSync (chunk-FDCL5M4P.js?v=a5826b93:19137:13)
+SimulationResults @ SimulationResults.tsx:229
+renderWithHooks @ chunk-FDCL5M4P.js?v=a5826b93:11548
+mountIndeterminateComponent @ chunk-FDCL5M4P.js?v=a5826b93:14926
+beginWork @ chunk-FDCL5M4P.js?v=a5826b93:15914
+callCallback2 @ chunk-FDCL5M4P.js?v=a5826b93:3674
+invokeGuardedCallbackDev @ chunk-FDCL5M4P.js?v=a5826b93:3699
+invokeGuardedCallback @ chunk-FDCL5M4P.js?v=a5826b93:3733
+beginWork$1 @ chunk-FDCL5M4P.js?v=a5826b93:19765
+performUnitOfWork @ chunk-FDCL5M4P.js?v=a5826b93:19198
+workLoopSync @ chunk-FDCL5M4P.js?v=a5826b93:19137
+renderRootSync @ chunk-FDCL5M4P.js?v=a5826b93:19116
+recoverFromConcurrentError @ chunk-FDCL5M4P.js?v=a5826b93:18736
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18684
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+hook.js:608 The above error occurred in the <SimulationResults> component:
+
+    at SimulationResults (http://localhost:3000/@fs/Volumes/privateGg/ai-microfront-ant/packages/simulation-results/src/simulation-results/SimulationResults.tsx?t=1758824163512:45:3)
+    at div
+    at div
+    at http://localhost:3000/node_modules/.vite/deps/antd.js?v=a5826b93:48084:16
+    at div
+    at div
+    at div
+    at div
+    at http://localhost:3000/node_modules/.vite/deps/antd.js?v=a5826b93:48084:16
+    at div
+    at div
+    at div
+    at div
+    at App (http://localhost:3000/src/App.tsx?t=1758824163512:35:35)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+overrideMethod @ hook.js:608
+logCapturedError @ chunk-FDCL5M4P.js?v=a5826b93:14032
+update.callback @ chunk-FDCL5M4P.js?v=a5826b93:14052
+callCallback @ chunk-FDCL5M4P.js?v=a5826b93:11248
+commitUpdateQueue @ chunk-FDCL5M4P.js?v=a5826b93:11265
+commitLayoutEffectOnFiber @ chunk-FDCL5M4P.js?v=a5826b93:17093
+commitLayoutMountEffects_complete @ chunk-FDCL5M4P.js?v=a5826b93:17980
+commitLayoutEffects_begin @ chunk-FDCL5M4P.js?v=a5826b93:17969
+commitLayoutEffects @ chunk-FDCL5M4P.js?v=a5826b93:17920
+commitRootImpl @ chunk-FDCL5M4P.js?v=a5826b93:19353
+commitRoot @ chunk-FDCL5M4P.js?v=a5826b93:19277
+finishConcurrentRender @ chunk-FDCL5M4P.js?v=a5826b93:18760
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18718
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+chunk-FDCL5M4P.js?v=a5826b93:19413 Uncaught ReferenceError: series is not defined
+    at SimulationResults (SimulationResults.tsx:229:7)
+    at renderWithHooks (chunk-FDCL5M4P.js?v=a5826b93:11548:26)
+    at mountIndeterminateComponent (chunk-FDCL5M4P.js?v=a5826b93:14926:21)
+    at beginWork (chunk-FDCL5M4P.js?v=a5826b93:15914:22)
+    at beginWork$1 (chunk-FDCL5M4P.js?v=a5826b93:19753:22)
+    at performUnitOfWork (chunk-FDCL5M4P.js?v=a5826b93:19198:20)
+    at workLoopSync (chunk-FDCL5M4P.js?v=a5826b93:19137:13)
+    at renderRootSync (chunk-FDCL5M4P.js?v=a5826b93:19116:15)
+    at recoverFromConcurrentError (chunk-FDCL5M4P.js?v=a5826b93:18736:28)
+    at performConcurrentWorkOnRoot (chunk-FDCL5M4P.js?v=a5826b93:18684:30)
+SimulationResults @ SimulationResults.tsx:229
+renderWithHooks @ chunk-FDCL5M4P.js?v=a5826b93:11548
+mountIndeterminateComponent @ chunk-FDCL5M4P.js?v=a5826b93:14926
+beginWork @ chunk-FDCL5M4P.js?v=a5826b93:15914
+beginWork$1 @ chunk-FDCL5M4P.js?v=a5826b93:19753
+performUnitOfWork @ chunk-FDCL5M4P.js?v=a5826b93:19198
+workLoopSync @ chunk-FDCL5M4P.js?v=a5826b93:19137
+renderRootSync @ chunk-FDCL5M4P.js?v=a5826b93:19116
+recoverFromConcurrentError @ chunk-FDCL5M4P.js?v=a5826b93:18736
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18684
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+favicon.ico:1  GET http://localhost:3000/favicon.ico 404 (Not Found)
+App.tsx:325 [simulation] skipping get_redis_detail: no Cognito token available
+overrideMethod @ hook.js:608
+(anonymous) @ App.tsx:325
+await in (anonymous)
+(anonymous) @ App.tsx:333
+commitHookEffectListMount @ chunk-FDCL5M4P.js?v=a5826b93:16915
+commitPassiveMountOnFiber @ chunk-FDCL5M4P.js?v=a5826b93:18156
+commitPassiveMountEffects_complete @ chunk-FDCL5M4P.js?v=a5826b93:18129
+commitPassiveMountEffects_begin @ chunk-FDCL5M4P.js?v=a5826b93:18119
+commitPassiveMountEffects @ chunk-FDCL5M4P.js?v=a5826b93:18109
+flushPassiveEffectsImpl @ chunk-FDCL5M4P.js?v=a5826b93:19490
+flushPassiveEffects @ chunk-FDCL5M4P.js?v=a5826b93:19447
+performSyncWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18868
+flushSyncCallbacks @ chunk-FDCL5M4P.js?v=a5826b93:9119
+commitRootImpl @ chunk-FDCL5M4P.js?v=a5826b93:19432
+commitRoot @ chunk-FDCL5M4P.js?v=a5826b93:19277
+finishConcurrentRender @ chunk-FDCL5M4P.js?v=a5826b93:18805
+performConcurrentWorkOnRoot @ chunk-FDCL5M4P.js?v=a5826b93:18718
+workLoop @ chunk-FDCL5M4P.js?v=a5826b93:197
+flushWork @ chunk-FDCL5M4P.js?v=a5826b93:176
+performWorkUntilDeadline @ chunk-FDCL5M4P.js?v=a5826b93:384
+
+
+---
+
+**Cursor**
+
+I see the runtime error is due to a leftover dependency referencing an old variable name. I'll update the effect dependency from series to points in `SimulationResults.tsx` and run lints.
+
+```typescriptreact
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as d3 from "d3";
+
+export type SimulationResultsProps = {
+  dpeId: string;
+  simul?: string;
+  token?: string;
+  getAccessToken?: () => Promise<string | undefined>;
+  apiBaseUrl?: string;
+  width?: number;
+  height?: number;
+  className?: string;
+};
+
+type FetchState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "success"; data: T };
+
+type ChartPoint = {
+  index: number;
+  ep?: number;
+  ges?: number;
+  cost?: number;
+  letter?: string;
+};
+
+function parseSimulationGraphData(payload: unknown): ChartPoint[] | null {
+  try {
+    // Expecting { data: [ { cost, result: { ep_conso_5_usages_m2, emission_ges_5_usages_m2, bilan_dpe_letter } }, ... ] }
+    if (!payload || typeof payload !== "object") return null;
+    const root = payload as any;
+    const arr: any[] = Array.isArray(root?.data) ? root.data : (Array.isArray(root) ? root : []);
+    if (!Array.isArray(arr)) return null;
+    const points: ChartPoint[] = arr.map((item: any, idx: number) => {
+      const res = item?.result || {};
+      const ep = Number(res?.ep_conso_5_usages_m2);
+      const ges = Number(res?.emission_ges_5_usages_m2);
+      const cost = Number(item?.cost ?? res?.cost);
+      const letter = (res?.bilan_dpe_letter as string | undefined) || undefined;
+      const p: ChartPoint = { index: idx };
+      if (Number.isFinite(ep)) p.ep = ep;
+      if (Number.isFinite(ges)) p.ges = ges;
+      if (Number.isFinite(cost)) p.cost = cost;
+      if (letter && typeof letter === "string") p.letter = letter;
+      return p;
+    });
+    return points;
+  } catch {
+    return null;
+  }
+}
+
+export const SimulationResults: React.FC<SimulationResultsProps> = ({
+  dpeId,
+  simul,
+  token,
+  getAccessToken,
+  apiBaseUrl = "https://api-dev.etiquettedpe.fr",
+  width = 640,
+  height = 360,
+  className,
+}) => {
+  const [state, setState] = useState<FetchState<unknown>>({ status: "idle" });
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(token);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveToken() {
+      if (token) {
+        setResolvedToken(token);
+        return;
+      }
+      if (getAccessToken) {
+        try {
+          const t = await getAccessToken();
+          if (!cancelled) setResolvedToken(t);
+        } catch {
+          if (!cancelled) setResolvedToken(undefined);
+        }
+      }
+    }
+    resolveToken();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, getAccessToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedToken) {
+      // wait until a token is available
+      return () => {
+        cancelled = true;
+      };
+    }
+    setState({ status: "loading" });
+    const url = new URL("/backoffice/simulation_graph", apiBaseUrl);
+    url.searchParams.set("ref_ademe", dpeId);
+    if (simul) url.searchParams.set("simul", simul);
+    fetch(url.toString(), {
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${resolvedToken}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) setState({ status: "success", data: json });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setState({ status: "error", error: (err as Error).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, dpeId, simul, resolvedToken]);
+
+  const points = useMemo(() => {
+    if (state.status !== "success") return null;
+    return parseSimulationGraphData(state.data);
+  }, [state]);
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+
+    if (!points || points.length === 0) return;
+    const margin = { top: 20, right: 40, bottom: 30, left: 48 };
+    const innerWidth = Math.max(0, width - margin.left - margin.right);
+    const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    const xDomain: [number, number] = [0, Math.max(0, (points.length - 1))];
+    const epMax = d3.max(points, (p) => Number(p.ep ?? 0)) ?? 0;
+    const gesMax = d3.max(points, (p) => Number(p.ges ?? 0)) ?? 0;
+    const leftMax = Math.max(epMax, gesMax, 0);
+    const costMax = d3.max(points, (p) => Number(p.cost ?? 0)) ?? 0;
+
+    const x = d3.scaleLinear().domain(xDomain).nice().range([0, innerWidth]);
+    const yLeft = d3.scaleLinear().domain([0, leftMax]).nice().range([innerHeight, 0]);
+    const yRight = d3.scaleLinear().domain([0, costMax]).nice().range([innerHeight, 0]);
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerHeight})`)
+      .call(d3.axisBottom(x).ticks(Math.min(points.length, 10)).tickFormat((v) => String(v)));
+    g.append("g").call(d3.axisLeft(yLeft));
+    g.append("g")
+      .attr("transform", `translate(${innerWidth},0)`) 
+      .call(d3.axisRight(yRight));
+
+    const epSeries = points.filter((p) => Number.isFinite(p.ep)).map((p) => ({ x: p.index, y: Number(p.ep) }));
+    const gesSeries = points.filter((p) => Number.isFinite(p.ges)).map((p) => ({ x: p.index, y: Number(p.ges) }));
+    const costSeries = points.filter((p) => Number.isFinite(p.cost)).map((p) => ({ x: p.index, y: Number(p.cost) }));
+
+    const lineLeft = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yLeft(d.y));
+
+    const lineRight = d3
+      .line<{ x: number; y: number }>()
+      .x((d) => x(d.x))
+      .y((d) => yRight(d.y));
+
+    if (epSeries.length > 0) {
+      g.append("path")
+        .datum(epSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#1677ff")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+
+      // EP markers with letter labels
+      const epGroup = g.append("g");
+      epGroup
+        .selectAll("circle.ep")
+        .data(points.filter((p) => Number.isFinite(p.ep)))
+        .enter()
+        .append("circle")
+        .attr("class", "ep")
+        .attr("cx", (p) => x(p.index))
+        .attr("cy", (p) => yLeft(Number(p.ep)))
+        .attr("r", 3.5)
+        .attr("fill", "#1677ff");
+
+      epGroup
+        .selectAll("text.letter")
+        .data(points.filter((p) => Number.isFinite(p.ep) && p.letter))
+        .enter()
+        .append("text")
+        .attr("class", "letter")
+        .attr("x", (p) => x(p.index) + 6)
+        .attr("y", (p) => yLeft(Number(p.ep)) - 6)
+        .attr("font-size", 10)
+        .attr("fill", "#111827")
+        .text((p) => String(p.letter));
+    }
+
+    if (gesSeries.length > 0) {
+      g.append("path")
+        .datum(gesSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#10b981")
+        .attr("stroke-width", 2)
+        .attr("d", lineLeft);
+    }
+
+    if (costSeries.length > 0) {
+      g.append("path")
+        .datum(costSeries)
+        .attr("fill", "none")
+        .attr("stroke", "#f59e0b")
+        .attr("stroke-width", 2)
+        .attr("d", lineRight);
+    }
+  }, [points, width, height]);
+
+  if (state.status === "loading") {
+    return <div className={className}>Loading simulation results…</div>;
+  }
+  if (state.status === "error") {
+    return <div className={className}>Error: {state.error}</div>;
+  }
+
+  if (state.status === "success" && !points) {
+    return (
+      <div className={className}>
+        Unsupported data format
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(state.data, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return <svg ref={svgRef} className={className} width={width} height={height} />;
+};
+
+
+
+```
+
+Fixed. I replaced the stale effect dependency to use points instead of series in `SimulationResults.tsx`. The runtime ReferenceError should be gone.
 

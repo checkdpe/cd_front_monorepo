@@ -1,3 +1,25 @@
+# Update left panel button functionality
+_Exported on 26/09/2025 at 16:44:54 CEST from Cursor (1.5.5)_
+
+---
+
+**User**
+
+on left panel : 2 buttons for closing 
+one close : (it just closes the left panel and let the user edit json in main view)
+one "cancel" with current behavior of close button
+
+---
+
+**Cursor**
+
+I'll search the codebase to locate the left panel/drawer component and the current close/cancel behaviors so I can add the two buttons with correct handlers.
+
+I'll open and update the `DpeDrawerEditor` to add two buttons in the header: a "Close" that simply closes, and a "Cancel" that uses the current discard-confirm behavior. Then I'll adjust the Drawer extra to include both as well.
+
+I’m going to update the left panel header and drawer actions to add two buttons: “Close” (silent close) and “Cancel” (discard-confirm with current behavior), keeping “Apply” as primary.
+
+```typescriptreact
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Checkbox, Drawer, Space, Switch, message, InputNumber, Modal, Input } from "antd";
 import { TemplateEditorModal } from "@acme/template-editor";
@@ -1014,33 +1036,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                 <>
                   {(availableOptions[v.id] && Array.isArray(availableOptions[v.id]) && (availableOptions[v.id] as any[]).length > 0) ? (
                     <div>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                        <div style={{ fontWeight: 500 }}>Scope</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{ fontWeight: 500 }}>explode</div>
-                          <Switch
-                            checked={scopeStrategy[v.id] === "explode"}
-                            onChange={(checked) => {
-                              try {
-                                let parsed: any = [];
-                                try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-                                const runs: any[] = Array.isArray(parsed) ? parsed : [];
-                                const variantPath = v.id;
-                                let entry = runs.find((r) => r && r.elements_variant === variantPath);
-                                if (!entry) {
-                                  entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-                                  runs.push(entry);
-                                }
-                                entry.scope_strategy = checked ? "explode" : "all";
-                                onApply(JSON.stringify(runs, null, 2));
-                                setScopeStrategy((prev) => ({ ...prev, [v.id]: entry.scope_strategy }));
-                              } catch {
-                                message.error("Failed to update scope strategy");
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
+                      <div style={{ fontWeight: 500, marginBottom: 6 }}>Scope</div>
                       <div style={{ display: "grid", gap: 6 }}>
                         {(availableOptions[v.id] || []).map((opt, idx) => {
                           const detailsData = { variant: v.id, collection: v.collection, itemKey: v.itemKey, index: idx, key: opt.key, selected: opt.selected, payload: opt.payload };
@@ -1048,25 +1044,25 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                           const adjId = Number(adjIdRaw);
                           const greyText = Number.isFinite(adjId) && adjId !== 1;
                           return (
-                            <div key={opt.key}>
-                              <label
-                                onContextMenu={(e) => {
-                                  e.preventDefault();
-                                }}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  padding: "4px 6px",
-                                  borderRadius: 6,
-                                  background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : ((externalScopeHighlight[v.id] && (externalScopeHighlight[v.id] as number[]).includes(idx)) ? "#eff6ff" : "transparent"),
-                                  border: (externalScopeHighlight[v.id] && (externalScopeHighlight[v.id] as number[]).includes(idx)) ? "2px solid #2563eb" : "1px solid transparent",
-                                  transition: "background-color 600ms ease",
-                                }}
-                              >
-                                <Checkbox
-                                  checked={opt.selected}
-                                  onChange={(e) => {
+                            <label
+                              key={opt.key}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "4px 6px",
+                                borderRadius: 6,
+                                background: highlighted[v.id]?.[opt.key] ? "#fff7ed" : ((externalScopeHighlight[v.id] && (externalScopeHighlight[v.id] as number[]).includes(idx)) ? "#eff6ff" : "transparent"),
+                                border: (externalScopeHighlight[v.id] && (externalScopeHighlight[v.id] as number[]).includes(idx)) ? "2px solid #2563eb" : "1px solid transparent",
+                                transition: "background-color 600ms ease",
+                              }}
+                            >
+                              <Checkbox
+                                checked={opt.selected}
+                                onChange={(e) => {
                             const checked = e.target.checked;
                             // Update JSON immediately (runs array with elements_scope) and highlight
                             try {
@@ -1112,70 +1108,51 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               message.error("Failed to update JSON");
                             }
                             }}
-                                />
-                                <span style={{ fontSize: 12, color: greyText ? "#9ca3af" : "#374151" }}>{opt.description}</span>
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  aria-label="Show details"
-                                  icon={<span aria-hidden="true">ℹ️</span>}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDetailsModal({ open: true, title: `${v.label} · ${opt.description}`, data: detailsData });
-                                  }}
-                                />
-                              </label>
-                              {scopeStrategy[v.id] === "explode" && opt.selected ? (
-                                <div style={{ margin: "6px 0 10px 24px", borderLeft: "2px solid #e5e7eb", paddingLeft: 10 }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                    {(() => {
-                                      try {
-                                        const configuredInputKey = mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "donnee_entree.epaisseur_isolation";
-                                        const inputPath = String(configuredInputKey || "").split(".").filter(Boolean);
-                                        const collectionObj = envelopeData?.[v.collection];
-                                        let items: any[] = [];
-                                        if (Array.isArray(collectionObj?.[v.itemKey])) {
-                                          items = collectionObj[v.itemKey] as any[];
-                                        } else if (Array.isArray(collectionObj)) {
-                                          items = (collectionObj as any[]).map((slot) => (slot && typeof slot === "object" ? slot[v.itemKey] : undefined)).filter(Boolean);
-                                        }
-                                        const item = items?.[idx];
-                                        const val = inputPath.length ? deepGet(item, inputPath as any) : undefined;
-                                        const num = typeof val === "number" ? val : Number(val);
-                                        const displayVal = Number.isFinite(num) ? String(num) : "—";
-                                        return (
-                                          <span style={{ fontSize: 12, color: "#374151", padding: "1px 6px", background: "#f3f4f6", borderRadius: 6 }}>{displayVal}</span>
-                                        );
-                                      } catch {
-                                        return null;
-                                      }
-                                    })()}
-                                    {(() => {
-                                      const presentIds = getPresentScenarioIds(v.id);
-                                      const presentIdsSet = new Set<number>(presentIds);
-                                      const rowIds: number[] = (templateScenarioIds[v.id] || []).slice();
-                                      return rowIds.map((scenarioId, tidx) => {
-                                        const isEnabled = Boolean(scenarioEnabled[v.id]?.[tidx]);
-                                        if (!isEnabled) return null;
-                                        const presentIndex = presentIds.indexOf(Number(scenarioId));
-                                        const tmplInc = templateDerived[v.id]?.increments?.[tidx];
-                                        const incVal = presentIndex !== -1
-                                          ? (pricing[v.id]?.increments?.[presentIndex] ?? 0)
-                                          : (Number.isFinite(tmplInc) ? Number(tmplInc) : 0);
-                                        return (
-                                          <span key={`subval-${idx}-${tidx}`} style={{ fontSize: 12, color: presentIdsSet.has(Number(scenarioId)) ? "#374151" : "#9ca3af", padding: "1px 6px", background: "#f3f4f6", borderRadius: 6 }}>{incVal}</span>
-                                        );
-                                      });
-                                    })()}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
+                              />
+                              <span style={{ fontSize: 12, color: greyText ? "#9ca3af" : "#374151" }}>{opt.description}</span>
+                              <Button
+                                size="small"
+                                type="text"
+                                aria-label="Show details"
+                                icon={<span aria-hidden="true">ℹ️</span>}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDetailsModal({ open: true, title: `${v.label} · ${opt.description}`, data: detailsData });
+                                }}
+                              />
+                            </label>
                           );
                         })}
                       </div>
                     </div>
                   ) : null}
+                  <div style={{ height: 8 }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                    <div style={{ fontWeight: 500 }}>explode</div>
+                    <Switch
+                      checked={scopeStrategy[v.id] === "explode"}
+                      onChange={(checked) => {
+                        try {
+                          let parsed: any = [];
+                          try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                          const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                          const collectionName = v.collection;
+                          const itemKey = v.itemKey;
+                          const variantPath = v.id;
+                          let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                          if (!entry) {
+                            entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                            runs.push(entry);
+                          }
+                          entry.scope_strategy = checked ? "explode" : "all";
+                          onApply(JSON.stringify(runs, null, 2));
+                          setScopeStrategy((prev) => ({ ...prev, [v.id]: entry.scope_strategy }));
+                        } catch {
+                          message.error("Failed to update scope strategy");
+                        }
+                      }}
+                    />
+                  </div>
                   <div style={{ height: 8 }} />
                   <div>
                     <div style={{ fontWeight: 500, marginBottom: 6 }}>Scenarios</div>
@@ -1522,4 +1499,23 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
   );
 };
 
+
+
+```
+
+- I’ll add two actions to the left panel:
+  - Close: silently close the panel and keep current JSON edits visible in the main view.
+  - Cancel: keep the existing confirm-discard behavior (revert to original and close).
+
+I updated `DpeDrawerEditor` so both inline and Drawer variants now have these buttons.
+
+- Inline header now shows: Close, Cancel, Apply.
+- Drawer extra actions now show: Close, Cancel, Apply.
+
+You can find them in `packages/dpe-editor/src/ui/DpeDrawerEditor.tsx`.
+
+- Close uses `onClose`.
+- Cancel uses the previous `handleDrawerClose` confirm flow.
+
+All good with lint.
 

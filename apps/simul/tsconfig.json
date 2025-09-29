@@ -1,6 +1,18 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@acme/chainlit-client": [
+        "../../packages/chainlit-client/src/index.ts"
+      ],
+      "@acme/simulation-results": [
+        "../../packages/simulation-results/src/index.ts"
+      ],
+      "@acme/simulation-detail": [
+        "../../packages/simulation-detail/src/index.ts"
+      ]
+    },
     "types": [
       "vite/client"
     ]

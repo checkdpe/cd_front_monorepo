@@ -38,6 +38,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(vite@5.4.20(@types/node@20.19.17)(sass-embedded@1.93.0)(sass@1.93.0))
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       eslint:
         specifier: ^9.14.0
         version: 9.36.0
@@ -234,12 +237,24 @@ importers:
 
   apps/simul:
     dependencies:
+      '@acme/chainlit':
+        specifier: workspace:*
+        version: link:../../packages/chainlit
+      '@acme/chainlit-client':
+        specifier: workspace:*
+        version: link:../../packages/chainlit-client
       '@acme/dpe-editor':
         specifier: workspace:*
         version: link:../../packages/dpe-editor
       '@acme/load-scenario':
         specifier: workspace:*
         version: link:../../packages/load-scenario
+      '@acme/simulation-detail':
+        specifier: workspace:*
+        version: link:../../packages/simulation-detail
+      '@acme/simulation-results':
+        specifier: workspace:*
+        version: link:../../packages/simulation-results
       '@acme/simulation-scenarios':
         specifier: workspace:*
         version: link:../../packages/simulation-scenarios
@@ -249,6 +264,9 @@ importers:
       '@ant-design/icons':
         specifier: ^6.0.2
         version: 6.0.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@chainlit/react-client':
+        specifier: ^0.2.4
+        version: 0.2.4(@types/react@18.3.24)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recoil@0.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       antd:
         specifier: ^5.27.4
         version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -303,8 +321,55 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.17)(jsdom@24.1.3)(sass-embedded@1.93.0)(sass@1.93.0)
 
+  packages/chainlit:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.17)(jsdom@24.1.3)(sass-embedded@1.93.0)(sass@1.93.0)
+
+  packages/chainlit-client:
+    dependencies:
+      '@acme/chainlit':
+        specifier: workspace:*
+        version: link:../chainlit
+      '@chainlit/react-client':
+        specifier: ^0.2.4
+        version: 0.2.4(@types/react@18.3.24)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recoil@0.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+      recoil:
+        specifier: ^0.7.7
+        version: 0.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.17)(jsdom@24.1.3)(sass-embedded@1.93.0)(sass@1.93.0)
+
   packages/dpe-editor:
     dependencies:
+      '@acme/template-editor':
+        specifier: workspace:*
+        version: link:../template-editor
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -384,7 +449,61 @@ importers:
         specifier: ^5.5.4
         version: 5.9.2
 
+  packages/simulation-detail:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+
+  packages/simulation-results:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/d3':
+        specifier: ^7.4.3
+        version: 7.4.3
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      d3:
+        specifier: ^7.9.0
+        version: 7.9.0
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+
   packages/simulation-scenarios:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      antd:
+        specifier: ^5.27.4
+        version: 5.27.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.2
+
+  packages/template-editor:
     dependencies:
       react:
         specifier: ^18.2.0
@@ -791,6 +910,14 @@ packages:
 
   '@bundled-es-modules/statuses@1.0.1':
     resolution: {integrity: sha512-yn7BklA5acgcBr+7w064fGV+SGIFySjCKpqjcWgBAIfrAkY+4GQTJJHQMeT3V/sgz23VTEVV8TtOmkvJAhFVfg==}
+
+  '@chainlit/react-client@0.2.4':
+    resolution: {integrity: sha512-G59Ucwew+Z8wHS1+PVwJEPNGR0LCJlybUmfdgY3sIraiRL158VVRY+FlXoC3vV+s4/HA7b9pzh+MAqnQmXIwOw==}
+    peerDependencies:
+      '@types/react': ^18.3.1
+      react: ^18.3.1
+      react-dom: ^18.3.1
+      recoil: ^0.7.7
 
   '@csstools/color-helpers@5.1.0':
     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
@@ -1906,6 +2033,9 @@ packages:
     resolution: {integrity: sha512-PpjSboaDUE6yl+1qlg3Si57++e84oXdWGbuFUSAciXsVfEZJJJupR2Nb0QuXHiunt2vGR+1PTizOMvnUPaG2Qg==}
     engines: {node: '>=16.0.0'}
 
+  '@socket.io/component-emitter@3.1.2':
+    resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
+
   '@swc/core-darwin-arm64@1.13.5':
     resolution: {integrity: sha512-lKNv7SujeXvKn16gvQqUQI5DdyY8v7xcoO3k06/FJbHJS90zEwZdQiMNRiqpYw/orU543tPaWgz7cIYWhbopiQ==}
     engines: {node: '>=10'}
@@ -2785,6 +2915,15 @@ packages:
   dayjs@1.11.18:
     resolution: {integrity: sha512-zFBQ7WFRvVRhKcWoUh+ZA1g2HVgUbsZm9sbddh8EC5iv93sui8DVVz1Npvz+r6meo9VKfa8NyLWBsQK1VvIKPA==}
 
+  debug@4.3.7:
+    resolution: {integrity: sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==}
+    engines: {node: '>=6.0'}
+    peerDependencies:
+      supports-color: '*'
+    peerDependenciesMeta:
+      supports-color:
+        optional: true
+
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
     engines: {node: '>=6.0'}
@@ -2925,6 +3064,13 @@ packages:
   encodeurl@1.0.2:
     resolution: {integrity: sha512-TPJXq8JqFaVYm2CWmPvnP2Iyo4ZSM7/QKcSmuMLDObfpH5fi7RUGmd/rTDf+rut/saiDiQEeVTNgAmJEdAOx0w==}
     engines: {node: '>= 0.8'}
+
+  engine.io-client@6.6.3:
+    resolution: {integrity: sha512-T0iLjnyNWahNyv/lcjS2y4oE358tVS/SYQNxYXGAJ9/GLgH4VCvOQ/mhTjqU88mLZCQgiG8RIegFHYCdVC+j5w==}
+
+  engine.io-parser@5.2.3:
+    resolution: {integrity: sha512-HqD3yTBfnBxIrbnM1DoD6Pcq8NECnh8d4As1Qgh0z5Gg3jRRIqijury0CL3ghu/edArpUYiYqQiDUQBIs4np3Q==}
+    engines: {node: '>=10.0.0'}
 
   enquire.js@2.1.6:
     resolution: {integrity: sha512-/KujNpO+PT63F7Hlpu4h3pE3TokKRHN26JYmQpPyjkRD/N57R7bPDNojMXdi7uveAKjYB7yQnartCxZnFWr0Xw==}
@@ -3226,6 +3372,9 @@ packages:
   graphql@16.11.0:
     resolution: {integrity: sha512-mS1lbMsxgQj6hge1XZ6p7GPhbrtFwUFYi3wRzXAC/FmYnyXMTvvI3td3rjmQ2u8ewXueaSvRPWaEcgVVOT9Jnw==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
+
+  hamt_plus@1.0.2:
+    resolution: {integrity: sha512-t2JXKaehnMb9paaYA7J0BX8QQAY8lwfQ9Gjf4pg/mk4krt+cmwmU652HOoWonf+7+EQV97ARPMhhVgU1ra2GhA==}
 
   has-bigints@1.1.0:
     resolution: {integrity: sha512-R3pbpkcIqv2Pm3dUwgjclDRVmWpTJW2DcMzcIhEXEx1oh/CEMObMm3KLmRJOdvhM7o4uQBnwr8pzRK2sJWIqfg==}
@@ -3589,6 +3738,9 @@ packages:
   jsx-ast-utils@3.3.5:
     resolution: {integrity: sha512-ZZow9HBI5O6EPgSJLUb8n2NKgmVWTwCvHGwFuJlMjvLFqlGG6pjirPhtdsseaLZjSibD8eegzmYpUZwoIlj2cQ==}
     engines: {node: '>=4.0'}
+
+  jwt-decode@3.1.2:
+    resolution: {integrity: sha512-UfpWE/VZn0iP50d8cz9NrZLM9lSWhcJ+0Gt/nm4by88UL+J1SiKN8/5dkjMmbEzwL2CAe+67GsegCbIKtbp75A==}
 
   keygrip@1.1.0:
     resolution: {integrity: sha512-iYSchDJ+liQ8iwbSI2QqsQOvqv58eJCEanyJPJi+Khyu8smkcKSFUCbPwzFcL7YVtZ6eONjqRX/38caJ7QjRAQ==}
@@ -4445,6 +4597,18 @@ packages:
   recma-stringify@1.0.0:
     resolution: {integrity: sha512-cjwII1MdIIVloKvC9ErQ+OgAtwHBmcZ0Bg4ciz78FtbT8In39aAYbaA7zvxQ61xVMSPE8WxhLwLbhif4Js2C+g==}
 
+  recoil@0.7.7:
+    resolution: {integrity: sha512-8Og5KPQW9LwC577Vc7Ug2P0vQshkv1y3zG3tSSkWMqkWSwHmE+by06L8JtnGocjW6gcCvfwB3YtrJG6/tWivNQ==}
+    peerDependencies:
+      react: '>=16.13.1'
+      react-dom: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
+      react-native:
+        optional: true
+
   redent@3.0.0:
     resolution: {integrity: sha512-6tDA8g98We0zd0GvVeMT9arEOnTw9qM03L9cJXaCjrip1OO764RDBLBfrB4cwzNGDj5OA5ioymC9GkizgWJDUg==}
     engines: {node: '>=8'}
@@ -4740,6 +4904,20 @@ packages:
     resolution: {integrity: sha512-ZA6oR3T/pEyuqwMgAKT0/hAv8oAXckzbkmR0UkUosQ+Mc4RxGoJkRmwHgHufaenlyAgE1Mxgpdcrf75y6XcnDg==}
     engines: {node: '>=14.16'}
 
+  socket.io-client@4.8.1:
+    resolution: {integrity: sha512-hJVXfu3E28NmzGk8o1sHhN3om52tRvwYeidbj7xKy2eIIse5IoKX3USlS6Tqt3BHAtflLIkCQBkzVrEEfWUyYQ==}
+    engines: {node: '>=10.0.0'}
+
+  socket.io-parser@4.2.4:
+    resolution: {integrity: sha512-/GbIKmo8ioc+NIWIhwdecY0ge+qVBSMdgxGygevmdHj24bsfgtCmcUUcQ5ZzcylGFHsN3k4HB4Cgkl96KVnuew==}
+    engines: {node: '>=10.0.0'}
+
+  sonner@1.7.4:
+    resolution: {integrity: sha512-DIS8z4PfJRbIyfVFDVnK9rO3eYDtse4Omcm6bt0oEr5/jtLgysmjuBl1frJ9E/EQZrFmKx2A8m/s5s9CRXIzhw==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+      react-dom: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -4855,6 +5033,11 @@ packages:
   supports-preserve-symlinks-flag@1.0.0:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
+
+  swr@2.3.6:
+    resolution: {integrity: sha512-wfHRmHWk/isGNMwlLGlZX5Gzz/uTgo0o2IRuTMcf4CPuPFJZlq0rDaKUx+ozB5nBOReNV1kiOyzMfj+MBMikLw==}
+    peerDependencies:
+      react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   symbol-tree@3.2.4:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
@@ -5246,6 +5429,18 @@ packages:
     resolution: {integrity: sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ==}
     engines: {node: '>=12'}
 
+  ws@8.17.1:
+    resolution: {integrity: sha512-6XQFvXTkbfUOZOKKILFG1PDK2NDQs4azKQl26T0YS5CxqWLgXajbPZ+h4gZekJyRqFU8pvnbAbbs/3TgRPy+GQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   ws@8.18.3:
     resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
     engines: {node: '>=10.0.0'}
@@ -5268,6 +5463,10 @@ packages:
 
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
+
+  xmlhttprequest-ssl@2.1.2:
+    resolution: {integrity: sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==}
+    engines: {node: '>=0.4.0'}
 
   xstate@4.38.3:
     resolution: {integrity: sha512-SH7nAaaPQx57dx6qvfcIgqKRXIh4L0A1iYEqim4s1u7c9VoCgzZc+63FY90AKU4ZzOC2cfJzTnpO4zK7fCUzzw==}
@@ -6155,6 +6354,23 @@ snapshots:
   '@bundled-es-modules/statuses@1.0.1':
     dependencies:
       statuses: 2.0.2
+
+  '@chainlit/react-client@0.2.4(@types/react@18.3.24)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recoil@0.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1))':
+    dependencies:
+      '@types/react': 18.3.24
+      jwt-decode: 3.1.2
+      lodash: 4.17.21
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+      recoil: 0.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      socket.io-client: 4.8.1
+      sonner: 1.7.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      swr: 2.3.6(react@18.3.1)
+      uuid: 9.0.1
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
 
   '@csstools/color-helpers@5.1.0': {}
 
@@ -7315,6 +7531,8 @@ snapshots:
       '@smithy/types': 3.7.2
       tslib: 2.8.1
 
+  '@socket.io/component-emitter@3.1.2': {}
+
   '@swc/core-darwin-arm64@1.13.5':
     optional: true
 
@@ -8361,6 +8579,10 @@ snapshots:
 
   dayjs@1.11.18: {}
 
+  debug@4.3.7:
+    dependencies:
+      ms: 2.1.3
+
   debug@4.4.3:
     dependencies:
       ms: 2.1.3
@@ -8483,6 +8705,20 @@ snapshots:
   encode-utf8@1.0.3: {}
 
   encodeurl@1.0.2: {}
+
+  engine.io-client@6.6.3:
+    dependencies:
+      '@socket.io/component-emitter': 3.1.2
+      debug: 4.3.7
+      engine.io-parser: 5.2.3
+      ws: 8.17.1
+      xmlhttprequest-ssl: 2.1.2
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+
+  engine.io-parser@5.2.3: {}
 
   enquire.js@2.1.6: {}
 
@@ -8942,6 +9178,8 @@ snapshots:
 
   graphql@16.11.0: {}
 
+  hamt_plus@1.0.2: {}
+
   has-bigints@1.1.0: {}
 
   has-flag@4.0.0: {}
@@ -9389,6 +9627,8 @@ snapshots:
       array.prototype.flat: 1.3.3
       object.assign: 4.1.7
       object.values: 1.2.1
+
+  jwt-decode@3.1.2: {}
 
   keygrip@1.1.0:
     dependencies:
@@ -10642,6 +10882,13 @@ snapshots:
       unified: 11.0.5
       vfile: 6.0.3
 
+  recoil@0.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      hamt_plus: 1.0.2
+      react: 18.3.1
+    optionalDependencies:
+      react-dom: 18.3.1(react@18.3.1)
+
   redent@3.0.0:
     dependencies:
       indent-string: 4.0.0
@@ -10996,6 +11243,29 @@ snapshots:
 
   slash@5.1.0: {}
 
+  socket.io-client@4.8.1:
+    dependencies:
+      '@socket.io/component-emitter': 3.1.2
+      debug: 4.3.7
+      engine.io-client: 6.6.3
+      socket.io-parser: 4.2.4
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+
+  socket.io-parser@4.2.4:
+    dependencies:
+      '@socket.io/component-emitter': 3.1.2
+      debug: 4.3.7
+    transitivePeerDependencies:
+      - supports-color
+
+  sonner@1.7.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+
   source-map-js@1.2.1: {}
 
   source-map@0.7.6: {}
@@ -11123,6 +11393,12 @@ snapshots:
       has-flag: 4.0.0
 
   supports-preserve-symlinks-flag@1.0.0: {}
+
+  swr@2.3.6(react@18.3.1):
+    dependencies:
+      dequal: 2.0.3
+      react: 18.3.1
+      use-sync-external-store: 1.5.0(react@18.3.1)
 
   symbol-tree@3.2.4: {}
 
@@ -11535,6 +11811,8 @@ snapshots:
       string-width: 5.1.2
       strip-ansi: 7.1.2
 
+  ws@8.17.1: {}
+
   ws@8.18.3: {}
 
   wsl-utils@0.1.0:
@@ -11544,6 +11822,8 @@ snapshots:
   xml-name-validator@5.0.0: {}
 
   xmlchars@2.2.0: {}
+
+  xmlhttprequest-ssl@2.1.2: {}
 
   xstate@4.38.3: {}
 
