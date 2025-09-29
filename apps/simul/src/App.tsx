@@ -619,6 +619,14 @@ export const App: React.FC = () => {
     }
   }
 
+  function clearSelectionMode() {
+    try {
+      setSelectedPoint(null);
+      setSelectedPointDetail(null);
+      setModifierSelection(null);
+    } catch {}
+  }
+
   async function fetchQueueOnce() {
     try {
       if (!refAdeme) return;
@@ -863,6 +871,8 @@ export const App: React.FC = () => {
           if (!clientId) return undefined;
           return `https://${domain}/logout?client_id=${encodeURIComponent(clientId)}&logout_uri=${encodeURIComponent(logoutRedirect)}`;
         })()}
+        backgroundColor={selectedPoint ? "#ecfdf5" : undefined}
+        borderColor={selectedPoint ? "#34d399" : undefined}
       />
       {/* Invisible iframe to pull session from auth origin when on different ports */}
       {!bridgeReady && (
@@ -912,6 +922,9 @@ export const App: React.FC = () => {
                 } catch {}
               }}
                 modifierSelection={modifierSelection}
+              hideDisabledVariants={Boolean(selectedPoint)}
+              hideUncheckedScopeItems={Boolean(selectedPoint)}
+              selectionMode={Boolean(selectedPoint)}
               onHighlightJsonPath={({ collection, itemKey, indices }) => {
                 try {
                   const ta = textAreaRef.current;
@@ -1373,6 +1386,31 @@ export const App: React.FC = () => {
 
       </div>
       </div>
+
+      {selectedPoint ? (
+        <button
+          onClick={clearSelectionMode}
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 24,
+            appearance: "none",
+            border: "1px solid #34d399",
+            background: "#ecfdf5",
+            color: "#065f46",
+            padding: "10px 14px",
+            borderRadius: 9999,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+            boxShadow: "0 8px 24px rgba(16,185,129,0.25)",
+          }}
+          aria-label="Close selection mode"
+          title="Close selection mode"
+        >
+          Close selection mode
+        </button>
+      ) : null}
     </div>
   );
 };

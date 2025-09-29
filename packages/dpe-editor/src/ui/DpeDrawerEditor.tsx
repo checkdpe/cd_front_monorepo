@@ -18,6 +18,11 @@ export type DpeDrawerEditorProps = {
   inline?: boolean;
   // Optional: selection hints from a simulation detail endpoint
   modifierSelection?: { path: string; seq: number[] }[] | null;
+  // Hide UI rows that are disabled or unchecked
+  hideDisabledVariants?: boolean;
+  hideUncheckedScopeItems?: boolean;
+  // Selection mode: disable all checkboxes and hide switches
+  selectionMode?: boolean;
 };
 
 type VariantId = string; // e.g. "dpe.logement.enveloppe.mur_collection.mur"
@@ -58,7 +63,7 @@ function ensurePath(root: any, path: string[]): any {
   return cursor;
 }
 
-export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath, inline = false, modifierSelection = null }) => {
+export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose, width = "50%", rootJsonText, onApply, apiLoadParams, getAccessToken, onLoadedFromApi, onHighlightJsonPath, inline = false, modifierSelection = null, hideDisabledVariants = false, hideUncheckedScopeItems = false, selectionMode = false }) => {
   const [availableOptions, setAvailableOptions] = useState<Record<VariantId, { key: string; description: string; selected: boolean; payload: any }[]>>({});
   const [highlighted, setHighlighted] = useState<Record<VariantId, Record<string, boolean>>>({});
   const [externalScopeHighlight, setExternalScopeHighlight] = useState<Record<VariantId, number[]>>({});
@@ -996,56 +1001,59 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
         </div>
         {variantDefs.map((v) => {
           const st = editorState[v.id] || { enabled: false, index: 0, text: "{\n}\n" };
+          if (hideDisabledVariants && !st.enabled) return null;
           return (
             <Card key={v.id} size="small" styles={{ body: { padding: 12 } }} style={{ background: st.enabled ? "#ffffff" : "#f5f5f5" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontWeight: 600 }}>{v.label}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div>enabled</div>
-                  <Switch
-                    checked={st.enabled}
-                    onChange={(checked) => {
-                      setEditorState((prev) => ({ ...prev, [v.id]: { ...(prev[v.id] || { enabled: false, index: 0, text: "{\n}\n" }), enabled: checked } }));
-                      try {
-                        let parsed: any = [];
-                        try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-                        if (Array.isArray(parsed)) {
-                          const runs: any[] = parsed;
-                          const variantPath = v.id;
-                          const idxInRuns = runs.findIndex((r) => r && r.elements_variant === variantPath);
-                          if (!checked) {
-                            if (idxInRuns !== -1) {
-                              runs.splice(idxInRuns, 1);
-                              onApply(JSON.stringify(runs, null, 2));
-                            }
-                            setScenarioEnabled((prev) => ({ ...prev, [v.id]: [] }));
-                            setScopeStrategy((prev) => ({ ...prev, [v.id]: "all" }));
-                          } else {
-                            if (idxInRuns === -1) {
-                              const entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] } as any;
-                              // Default scope to all available options for this variant when enabling
-                              try {
-                                const opts = availableOptions[v.id] || [];
-                                entry.elements_scope = opts.map((_, i) => i);
-                              } catch {}
-                              runs.push(entry);
-                              onApply(JSON.stringify(runs, null, 2));
+                {!selectionMode ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div>enabled</div>
+                    <Switch
+                      checked={st.enabled}
+                      onChange={(checked) => {
+                        setEditorState((prev) => ({ ...prev, [v.id]: { ...(prev[v.id] || { enabled: false, index: 0, text: "{\n}\n" }), enabled: checked } }));
+                        try {
+                          let parsed: any = [];
+                          try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                          if (Array.isArray(parsed)) {
+                            const runs: any[] = parsed;
+                            const variantPath = v.id;
+                            const idxInRuns = runs.findIndex((r) => r && r.elements_variant === variantPath);
+                            if (!checked) {
+                              if (idxInRuns !== -1) {
+                                runs.splice(idxInRuns, 1);
+                                onApply(JSON.stringify(runs, null, 2));
+                              }
+                              setScenarioEnabled((prev) => ({ ...prev, [v.id]: [] }));
+                              setScopeStrategy((prev) => ({ ...prev, [v.id]: "all" }));
                             } else {
-                              const entry = runs[idxInRuns];
-                              if (!Array.isArray(entry.elements_scope) || entry.elements_scope.length === 0) {
+                              if (idxInRuns === -1) {
+                                const entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] } as any;
+                                // Default scope to all available options for this variant when enabling
                                 try {
                                   const opts = availableOptions[v.id] || [];
-                                  entry.elements_scope = opts.map((_: any, i: number) => i);
-                                  onApply(JSON.stringify(runs, null, 2));
+                                  entry.elements_scope = opts.map((_, i) => i);
                                 } catch {}
+                                runs.push(entry);
+                                onApply(JSON.stringify(runs, null, 2));
+                              } else {
+                                const entry = runs[idxInRuns];
+                                if (!Array.isArray(entry.elements_scope) || entry.elements_scope.length === 0) {
+                                  try {
+                                    const opts = availableOptions[v.id] || [];
+                                    entry.elements_scope = opts.map((_: any, i: number) => i);
+                                    onApply(JSON.stringify(runs, null, 2));
+                                  } catch {}
+                                }
                               }
                             }
                           }
-                        }
-                      } catch {}
-                    }}
-                  />
-                </div>
+                        } catch {}
+                      }}
+                    />
+                  </div>
+                ) : null}
               </div>
               <div style={{ height: 8 }} />
               <div style={{ color: "#6b7280", fontSize: 12 }}>
@@ -1059,30 +1067,32 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                     <div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                         <div style={{ fontWeight: 500 }}>Scope</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{ fontWeight: 500 }}>explode</div>
-                          <Switch
-                            checked={scopeStrategy[v.id] === "explode"}
-                            onChange={(checked) => {
-                              try {
-                                let parsed: any = [];
-                                try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
-                                const runs: any[] = Array.isArray(parsed) ? parsed : [];
-                                const variantPath = v.id;
-                                let entry = runs.find((r) => r && r.elements_variant === variantPath);
-                                if (!entry) {
-                                  entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
-                                  runs.push(entry);
+                        {!selectionMode ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontWeight: 500 }}>explode</div>
+                            <Switch
+                              checked={scopeStrategy[v.id] === "explode"}
+                              onChange={(checked) => {
+                                try {
+                                  let parsed: any = [];
+                                  try { parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : []; } catch { parsed = []; }
+                                  const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                                  const variantPath = v.id;
+                                  let entry = runs.find((r) => r && r.elements_variant === variantPath);
+                                  if (!entry) {
+                                    entry = { elements_variant: variantPath, elements_scope: [], scope_strategy: "all", scenarios: [] };
+                                    runs.push(entry);
+                                  }
+                                  entry.scope_strategy = checked ? "explode" : "all";
+                                  onApply(JSON.stringify(runs, null, 2));
+                                  setScopeStrategy((prev) => ({ ...prev, [v.id]: entry.scope_strategy }));
+                                } catch {
+                                  message.error("Failed to update scope strategy");
                                 }
-                                entry.scope_strategy = checked ? "explode" : "all";
-                                onApply(JSON.stringify(runs, null, 2));
-                                setScopeStrategy((prev) => ({ ...prev, [v.id]: entry.scope_strategy }));
-                              } catch {
-                                message.error("Failed to update scope strategy");
-                              }
-                            }}
-                          />
-                        </div>
+                              }}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                       <div style={{ display: "grid", gap: 6 }}>
                         {(availableOptions[v.id] || []).map((opt, idx) => {
@@ -1090,6 +1100,7 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                           const adjIdRaw = (opt as any)?.payload?.enum_type_adjacence_id ?? (opt as any)?.payload?.donnee_entree?.enum_type_adjacence_id;
                           const adjId = Number(adjIdRaw);
                           const greyText = Number.isFinite(adjId) && adjId !== 1;
+                          if (hideUncheckedScopeItems && !opt.selected) return null;
                           return (
                             <div key={opt.key}>
                               <label
@@ -1109,7 +1120,9 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                               >
                                 <Checkbox
                                   checked={opt.selected}
+                                  disabled={selectionMode}
                                   onChange={(e) => {
+                            if (selectionMode) return;
                             const checked = e.target.checked;
                             // Update JSON immediately (runs array with elements_scope) and highlight
                             try {
@@ -1335,7 +1348,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                           <label style={{ display: "flex", alignItems: "center", gap: 6, color: isPresentInJson ? "#6b7280" : "#9ca3af", fontSize: 12, background: isHighlighted ? "#eff6ff" : undefined, borderRadius: 6, padding: isHighlighted ? "2px 4px" : undefined }}>
                             <Checkbox
                               checked={Boolean(scenarioEnabled[v.id]?.[idx])}
-                              onChange={(e) => toggleScenarioPresence(v.id, idx, e.target.checked)}
+                              disabled={selectionMode}
+                              onChange={(e) => { if (!selectionMode) toggleScenarioPresence(v.id, idx, e.target.checked); }}
                             />
                             <span>#{scenarioId}</span>
                           </label>
