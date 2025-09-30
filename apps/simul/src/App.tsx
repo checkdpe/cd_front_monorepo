@@ -62,6 +62,7 @@ export const App: React.FC = () => {
   const [selectedPointDetail, setSelectedPointDetail] = useState<any | null>(null);
   const [modifierSelection, setModifierSelection] = useState<{ path: string; seq: number[] }[] | null>(null);
   const [isModifierExpanded, setIsModifierExpanded] = useState<boolean>(false);
+  const [isPointDetailLoading, setIsPointDetailLoading] = useState<boolean>(false);
   const [expertMode, setExpertMode] = useState<boolean>(false);
   const [overrideCombinations, setOverrideCombinations] = useState<number | undefined>(undefined);
   const isChunksTooBig = useMemo(() => {
@@ -650,6 +651,7 @@ export const App: React.FC = () => {
       setSelectedPointDetail(null);
       setModifierSelection(null);
       setIsModifierExpanded(false);
+      setIsPointDetailLoading(false);
       updateUrlSelectionIndex(undefined);
     } catch {}
   }
@@ -1306,13 +1308,14 @@ export const App: React.FC = () => {
                         try { setIsSelectionMenuOpen(false); } catch {}
                         try { setSelectedPointDetail(null); } catch {}
                         try { setModifierSelection(null); } catch {}
+                        try { setIsPointDetailLoading(true); } catch {}
                         setSelectedPoint(p);
                         try { updateUrlSelectionIndex((p as any)?.index); } catch {}
                       }}
                       onPointDetail={(d) => {
                         try {
                           setSelectedPointDetail(d);
-                          setIsModifierExpanded(false);
+                          setIsPointDetailLoading(false);
                           // Extract modifierId array from detail response (support both direct and within redis_obj)
                           let root: any = d;
                           const rawRedis = (d && (d as any).redis_obj) as unknown;
@@ -1361,6 +1364,21 @@ export const App: React.FC = () => {
                       }} />
                       {(() => {
                         try {
+                          if (isPointDetailLoading) {
+                            return (
+                              <div style={{ marginTop: 12 }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                  <div style={{ color: "#4b5563" }}>modifierId</div>
+                                  <Button size="small" onClick={() => setIsModifierExpanded((v) => !v)}>{isModifierExpanded ? "collapse" : "expand"}</Button>
+                                </div>
+                                {isModifierExpanded ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6b7280", fontSize: 12 }}>
+                                    <Spin size="small" /> loading…
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          }
                           const raw = (selectedPointDetail && (selectedPointDetail as any).redis_obj) as unknown;
                           if (raw == null) return null;
                           let root: any = null;
