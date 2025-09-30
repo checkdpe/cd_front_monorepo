@@ -61,6 +61,7 @@ export const App: React.FC = () => {
   const [resultsYMetric, setResultsYMetric] = useState<"ep" | "ges">("ep");
   const [selectedPointDetail, setSelectedPointDetail] = useState<any | null>(null);
   const [modifierSelection, setModifierSelection] = useState<{ path: string; seq: number[] }[] | null>(null);
+  const [isModifierExpanded, setIsModifierExpanded] = useState<boolean>(false);
   const [expertMode, setExpertMode] = useState<boolean>(false);
   const [overrideCombinations, setOverrideCombinations] = useState<number | undefined>(undefined);
   const isChunksTooBig = useMemo(() => {
@@ -648,6 +649,7 @@ export const App: React.FC = () => {
       setSelectedPoint(null);
       setSelectedPointDetail(null);
       setModifierSelection(null);
+      setIsModifierExpanded(false);
       updateUrlSelectionIndex(undefined);
     } catch {}
   }
@@ -1310,6 +1312,7 @@ export const App: React.FC = () => {
                       onPointDetail={(d) => {
                         try {
                           setSelectedPointDetail(d);
+                          setIsModifierExpanded(false);
                           // Extract modifierId array from detail response (support both direct and within redis_obj)
                           let root: any = d;
                           const rawRedis = (d && (d as any).redis_obj) as unknown;
@@ -1377,10 +1380,15 @@ export const App: React.FC = () => {
                           const pretty = JSON.stringify(mod, null, 2);
                           return (
                             <div style={{ marginTop: 12 }}>
-                              <div style={{ color: "#4b5563", marginBottom: 6 }}>modifierId</div>
-                              <pre style={{ margin: 0, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                <div style={{ color: "#4b5563" }}>modifierId</div>
+                                <Button size="small" onClick={() => setIsModifierExpanded((v) => !v)}>{isModifierExpanded ? "collapse" : "expand"}</Button>
+                              </div>
+                              {isModifierExpanded ? (
+                                <pre style={{ margin: 0, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
 {pretty}
-                              </pre>
+                                </pre>
+                              ) : null}
                             </div>
                           );
                         } catch { return null; }
