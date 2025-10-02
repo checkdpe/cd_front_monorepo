@@ -12,16 +12,18 @@ export interface TopMenuProps {
   logoutHref?: string;
   onLogoutClick?: () => void;
   centeredTitle?: string;
+  backgroundColor?: string;
+  borderColor?: string;
 }
 
-export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth", isAuthenticated = false, logoutHref, onLogoutClick, centeredTitle }) => {
+export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMobileSrc = logoMobileDefault, onAuthClick, authLabel = "login / sign-up", authHref = "/auth", isAuthenticated = false, logoutHref, onLogoutClick, centeredTitle, backgroundColor = "#ffffff", borderColor = "#e5e7eb" }) => {
   return (
     <div style={{
       position: "sticky",
       top: 0,
       zIndex: 100,
-      background: "#ffffff",
-      borderBottom: "1px solid #e5e7eb",
+      background: backgroundColor,
+      borderBottom: `1px solid ${borderColor}`,
       padding: "8px 16px"
     }}>
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", maxWidth: 1200, margin: "0 auto", columnGap: 12 }}>

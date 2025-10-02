@@ -103,6 +103,10 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
   const [xDomainOverride, setXDomainOverride] = useState<[number, number] | null>(null);
   const [yDomainOverride, setYDomainOverride] = useState<[number, number] | null>(null);
 
+  // Keep a stable reference to onPointDetail to avoid re-triggering effects
+  const onPointDetailRef = useRef<SimulationResultsProps["onPointDetail"]>();
+  useEffect(() => { onPointDetailRef.current = onPointDetail; }, [onPointDetail]);
+
   useEffect(() => {
     let cancelled = false;
     async function resolveToken() {
@@ -163,6 +167,41 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
     if (state.status !== "success") return null;
     return parseSimulationGraphData(state.data);
   }, [state]);
+
+  // When a selectedIndex is provided (e.g., via URL deep-link), automatically fetch detail
+  // so consumers receive onPointDetail and can react (e.g., highlight left panel)
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      if (!points || !Array.isArray(points) || points.length === 0) return;
+      if (typeof selectedIndex !== "number") return;
+      if (!simul || !resolvedToken) return;
+      const pt = points.find((p) => Number(p.index) === Number(selectedIndex));
+      const detailId = pt?.id as (string | undefined);
+      if (!detailId) return;
+      const url = new URL("/backoffice/simulation_graph_detail", apiBaseUrl);
+      url.searchParams.set("ref_ademe", dpeId);
+      url.searchParams.set("run_name", simul);
+      url.searchParams.set("id", detailId);
+      fetch(url.toString(), {
+        headers: {
+          Accept: "*/*",
+          Authorization: `Bearer ${resolvedToken}`,
+        },
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((json) => {
+          if (!cancelled) {
+            try { onPointDetailRef.current && onPointDetailRef.current(json); } catch {}
+          }
+        })
+        .catch(() => { /* ignore */ });
+    } catch {}
+    return () => { cancelled = true; };
+  }, [points, selectedIndex, simul, resolvedToken, apiBaseUrl, dpeId]);
 
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -298,6 +337,44 @@ export const SimulationResults: React.FC<SimulationResultsProps> = ({
 
     const brushG = g.append("g").attr("class", "brush").call(brush as any);
     try { (brushG as any).lower(); } catch {}
+
+    // Double-click anywhere on SVG to zoom in by 15% centered on cursor, without blocking brush
+    d3.select(svgEl).on("dblclick", function (event: any) {
+      try {
+        const [sx, sy] = d3.pointer(event, svgEl);
+        // convert to inner chart coordinates by removing margins
+        const mx = sx - margin.left;
+        const my = sy - margin.top;
+        if (mx < 0 || my < 0 || mx > innerWidth || my > innerHeight) return;
+        const cx = x.invert(mx);
+        const cy = y.invert(my);
+        const currentX = x.domain() as [number, number];
+        const currentY = y.domain() as [number, number];
+        const fullX = xDomain as [number, number];
+        const fullY = yDomain as [number, number];
+        const factor = 0.70; // zoom in by 30%
+
+        const newXWidth = (currentX[1] - currentX[0]) * factor;
+        const newYHeight = (currentY[1] - currentY[0]) * factor;
+
+        let x0 = cx - newXWidth / 2;
+        let x1 = cx + newXWidth / 2;
+        const minX = Math.min(fullX[0], fullX[1]);
+        const maxX = Math.max(fullX[0], fullX[1]);
+        if (x0 < minX) { x1 += (minX - x0); x0 = minX; }
+        if (x1 > maxX) { x0 -= (x1 - maxX); x1 = maxX; }
+
+        let y0 = cy - newYHeight / 2;
+        let y1 = cy + newYHeight / 2;
+        const minY = Math.min(fullY[0], fullY[1]);
+        const maxY = Math.max(fullY[0], fullY[1]);
+        if (y0 < minY) { y1 += (minY - y0); y0 = minY; }
+        if (y1 > maxY) { y0 -= (y1 - maxY); y1 = maxY; }
+
+        setXDomainOverride([x0, x1]);
+        setYDomainOverride([y0, y1]);
+      } catch {}
+    });
   }, [points, width, height, controlledXMetric, controlledYMetric, localXMetric, localYMetric, mapColorDpe, selectedIndex, primaryColor, localSelectedIndex, xDomainOverride, yDomainOverride, onSelectPoint, onPointDetail, apiBaseUrl, dpeId, simul, resolvedToken]);
 
   if (state.status === "loading") {
