@@ -77,7 +77,7 @@ jobs:
     - name: Init app env files
       run: |
         set -e
-        apps=("simul" "auth")
+        apps=("simul" "auth", "dpes")
         for app in "${apps[@]}"; do
           src="apps/$app/.$LD_ENV.env"
           dst="apps/$app/.env"
@@ -98,7 +98,7 @@ jobs:
         set -e
         pnpm -r run build
         echo "Verify dist folders"
-        for app in simul auth; do
+        for app in simul auth dpes; do
           if [ -d "apps/$app/dist" ]; then
             echo "Found dist for $app"
           else
@@ -113,7 +113,7 @@ jobs:
     - name: Upload apps to S3
       run: |
         set -e
-        apps=("simul" "auth")
+        apps=("simul" "auth", "dpes")
         for app in "${apps[@]}"; do
           if [ -d "apps/$app/dist" ]; then
             echo "Uploading apps/$app/dist to s3://$S3_BUCKET/$app/"

@@ -7,6 +7,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
-  base: command === "serve" ? "/" : "/dpe-list/",
+  base: command === "serve" ? "/" : "/dpes/",
   publicDir: resolve(__dirname, "../../assets/images"),
 }));

@@ -3,6 +3,7 @@ import { Table, Card, Input, Select, Button, Space, message, Tag } from 'antd';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import { fetchDpeList } from '../services/dpeApi';
 import { DpeItem, DpeListParams, DpeListResponse } from '../types/dpe';
+import { DpeModal } from '@acme/dpe-modal';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -24,6 +25,8 @@ export const DpeList: React.FC = () => {
     sort_order: 'desc',
     version: '1.0',
   });
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedDpeItem, setSelectedDpeItem] = useState<DpeItem | null>(null);
 
   const loadData = async (params: DpeListParams = {}) => {
     setLoading(true);
@@ -76,6 +79,16 @@ export const DpeList: React.FC = () => {
 
   const handleRefresh = () => {
     loadData({ current: 1 });
+  };
+
+  const handleRowClick = (record: DpeItem) => {
+    setSelectedDpeItem(record);
+    setModalVisible(true);
+  };
+
+  const handleModalClose = () => {
+    setModalVisible(false);
+    setSelectedDpeItem(null);
   };
 
   const getDpeColor = (dpe: string | null) => {
@@ -238,6 +251,16 @@ export const DpeList: React.FC = () => {
         }}
         onChange={handleTableChange}
         scroll={{ x: 800 }}
+        onRow={(record) => ({
+          onClick: () => handleRowClick(record),
+          style: { cursor: 'pointer' },
+        })}
+      />
+      
+      <DpeModal
+        visible={modalVisible}
+        onClose={handleModalClose}
+        dpeItem={selectedDpeItem}
       />
     </Card>
   );
