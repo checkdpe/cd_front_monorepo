@@ -113,7 +113,7 @@ jobs:
     - name: Upload apps to S3
       run: |
         set -e
-        apps=("simul" "auth", "dpes")
+        apps=("simul" "auth", "dpes, "customers")
         for app in "${apps[@]}"; do
           if [ -d "apps/$app/dist" ]; then
             echo "Uploading apps/$app/dist to s3://$S3_BUCKET/$app/"
