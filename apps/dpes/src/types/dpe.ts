@@ -6,6 +6,7 @@ export interface DpeItem {
   note: number;
   msg_file_id: string;
   last_modified: string;
+  time?: number;
 }
 
 export interface DpeColumn {
