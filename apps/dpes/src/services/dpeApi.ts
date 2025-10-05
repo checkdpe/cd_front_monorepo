@@ -85,6 +85,11 @@ export const fetchLogs = async (refAdeme: string): Promise<LogsResponse> => {
   const searchParams = new URLSearchParams();
   searchParams.append('ref_ademe', refAdeme);
   
+  // Add env parameter based on which API base URL is being used
+  const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+  const envParam = useDevEnvironment ? "dev" : "stg";
+  searchParams.append('env', envParam);
+  
   const fullUrl = `${url}?${searchParams.toString()}`;
   
   const response = await authorizedFetch(fullUrl, {

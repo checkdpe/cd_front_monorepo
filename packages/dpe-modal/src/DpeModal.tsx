@@ -71,13 +71,22 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     
     setLogsLoading(true);
     try {
-      const apiBaseDev = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
       const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
       
-      const url = `${apiBaseDev}/${apiLogsSuffix}`;
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
       
       const searchParams = new URLSearchParams();
       searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
       
       const fullUrl = `${url}?${searchParams.toString()}`;
       
