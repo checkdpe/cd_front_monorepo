@@ -47,45 +47,54 @@ export const TopMenu: React.FC<TopMenuProps> = ({ logoSrc = logoDefault, logoMob
             }}>{centeredTitle}</div>
           )}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12 }}>
         {isAuthenticated ? (
-          <button
-            onClick={() => {
-              if (onLogoutClick) {
-                onLogoutClick();
-                return;
-              }
-              if (logoutHref) {
+          <>
+            <span style={{
+              fontSize: 14,
+              color: "#111827",
+              fontWeight: 500
+            }}>
+              {authLabel}
+            </span>
+            <button
+              onClick={() => {
+                if (onLogoutClick) {
+                  onLogoutClick();
+                  return;
+                }
+                if (logoutHref) {
+                  try {
+                    const url = new URL(logoutHref, window.location.href);
+                    window.location.href = url.toString();
+                  } catch {
+                    window.location.href = logoutHref;
+                  }
+                  return;
+                }
+                // Fallback to auth page if logout link not provided
                 try {
-                  const url = new URL(logoutHref, window.location.href);
+                  const url = new URL(authHref, window.location.href);
                   window.location.href = url.toString();
                 } catch {
-                  window.location.href = logoutHref;
+                  window.location.href = authHref;
                 }
-                return;
-              }
-              // Fallback to auth page if logout link not provided
-              try {
-                const url = new URL(authHref, window.location.href);
-                window.location.href = url.toString();
-              } catch {
-                window.location.href = authHref;
-              }
-            }}
-            style={{
-              appearance: "none",
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
-              color: "#111827",
-              padding: "6px 12px",
-              borderRadius: 8,
-              fontSize: 14,
-              cursor: "pointer"
-            }}
-            title="Sign out"
-          >
-            {authLabel}
-          </button>
+              }}
+              style={{
+                appearance: "none",
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                color: "#111827",
+                padding: "6px 12px",
+                borderRadius: 8,
+                fontSize: 14,
+                cursor: "pointer"
+              }}
+              title="Sign out"
+            >
+              Sign out
+            </button>
+          </>
         ) : (
           <button
             onClick={() => {
