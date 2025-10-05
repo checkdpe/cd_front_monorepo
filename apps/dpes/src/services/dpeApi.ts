@@ -1,4 +1,5 @@
 import { DpeListResponse, DpeListParams } from '../types/dpe';
+import { authorizedFetch } from '../auth';
 
 export interface LogItem {
   id?: string;
@@ -15,7 +16,7 @@ export interface LogsResponse {
   [key: string]: any;
 }
 
-const API_BASE_URL = 'https://api-dev.etiquettedpe.fr/backoffice';
+const API_BASE_URL = `${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice`;
 
 export const fetchDpeList = async (params: DpeListParams = {}): Promise<DpeListResponse> => {
   const searchParams = new URLSearchParams();
@@ -41,7 +42,7 @@ export const fetchDpeList = async (params: DpeListParams = {}): Promise<DpeListR
 
   const url = `${API_BASE_URL}/dpe_list?${searchParams.toString()}`;
   
-  const response = await fetch(url, {
+  const response = await authorizedFetch(url, {
     method: 'GET',
     headers: {
       'accept': 'application/json, text/plain, */*',
@@ -77,7 +78,7 @@ export const fetchLogs = async (refAdeme: string): Promise<LogsResponse> => {
   
   const fullUrl = `${url}?${searchParams.toString()}`;
   
-  const response = await fetch(fullUrl, {
+  const response = await authorizedFetch(fullUrl, {
     method: 'GET',
     headers: {
       'accept': 'application/json, text/plain, */*',
