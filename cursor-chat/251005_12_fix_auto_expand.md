@@ -1,3 +1,39 @@
+# Correct log name for DPE Details modal
+_Exported on 05/10/2025 at 23:50:29 CEST from Cursor (1.7.33)_
+
+---
+
+**User**
+
+the log to auto expand in DPE Details modal > Logs tab is 
+*_middleware_end_full_log
+not dev_middleware_end_full_log
+
+---
+
+**Cursor**
+
+I need to find and fix the log auto-expand logic in the DPE Details modal's Logs tab. Let me search for the current implementation and the correct log pattern.
+
+
+Now let me search for the current pattern being used to see if there are any other references to the incorrect pattern:
+
+
+Now let me search for the correct pattern to see if it exists anywhere in the codebase:
+
+
+Let me also search for any middleware_end_full_log patterns to see what variations exist:
+
+
+I can see from the search results that there's also a `stg_middleware_end_full_log` pattern in the logs. Let me check what the user is referring to by looking at the actual log data to understand the correct pattern. Based on the user's message, it seems like the pattern should be `*_middleware_end_full_log` (with a wildcard) rather than `dev_middleware_end_full_log`.
+
+Let me create a todo to track this fix and then implement the correction:
+
+
+Now let me fix the pattern in the DpeModal.tsx file:
+
+
+```typescriptreact
 import React, { useState, useEffect } from 'react';
 import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
 import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
@@ -836,3 +872,31 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     </>
   );
 };
+
+```
+
+Now let me check for any linting errors:
+
+
+Perfect! Let me mark the task as completed:
+
+
+## ✅ **Fixed!**
+
+I've successfully corrected the log auto-expand pattern in the DPE Details modal's Logs tab. Here's what I changed:
+
+### **The Fix:**
+- **Before:** `logType === 'dev_middleware_end_full_log'`
+- **After:** `logType.endsWith('_middleware_end_full_log')`
+
+### **Why This Change:**
+The new pattern `*_middleware_end_full_log` (implemented using `endsWith('_middleware_end_full_log')`) will now correctly auto-expand **any** log type that ends with `_middleware_end_full_log`, including:
+- `dev_middleware_end_full_log`
+- `stg_middleware_end_full_log` 
+- Any other environment prefix + `_middleware_end_full_log`
+
+### **Location:**
+The fix was applied in `/Volumes/privateGg/ai-microfront-ant/packages/dpe-modal/src/DpeModal.tsx` at line 737.
+
+Now when users navigate to the "logs" tab in the "Details" modal, any log with the pattern `*_middleware_end_full_log` will be automatically expanded by default, making it immediately visible without requiring user interaction.
+
