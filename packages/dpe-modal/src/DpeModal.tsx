@@ -30,19 +30,41 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
   }, [visible, dpeItem, activeTab]);
 
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
   const fetchQuotaStatus = async () => {
     if (!dpeItem) return;
     
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
     setLoading(true);
     try {
-      // Use the endpoint configuration from environment
-      const infosObject = import.meta.env.VITE_INFOS_OBJECT || '{"quota_status":{"endpoint":"/backoffice/dpe_quota"}}';
-      const config = JSON.parse(infosObject);
-      const endpoint = config.quota_status?.endpoint || '/backoffice/dpe_quota';
-      
       // Use the API base URL from environment
       const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
-      const fullUrl = `${apiBaseUrl}${endpoint}?ref_ademe=${dpeItem.id}`;
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
       
       const response = await fetch(fullUrl, {
         method: 'GET',
@@ -57,7 +79,18 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
       }
 
       const data = await response.json();
-      setQuotaStatus(data);
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus(data);
+      }
     } catch (error) {
       message.error('Failed to load quota status');
       console.error('Error loading quota status:', error);
@@ -153,14 +186,36 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   };
 
   const renderInfosTab = () => {
-    // Create info items array
-    const infoItems: InfoItem[] = [
-      {
-        key: 'quota_status',
-        name: 'quota_status',
-        value: quotaStatus
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Add quota status summary
+        infoItems.push({
+          key: 'quota_status_summary',
+          name: 'Quota Status Summary',
+          value: {
+            total_items: quotaStatus.table_values?.length || 0,
+            purchased_items: quotaStatus.table_values?.filter((item: any) => item.purchase === 1).length || 0,
+            api_response: quotaStatus
+          }
+        });
+        
+        // Add individual purchased items if any exist
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
       }
-    ];
+    }
 
     const columns = [
       {
@@ -238,7 +293,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
               <Spin size="large" />
               <div style={{ marginTop: 16 }}>Loading quota status...</div>
             </div>
-          ) : (
+          ) : infoItems.length > 0 ? (
             <Table
               columns={columns}
               dataSource={infoItems}
@@ -247,6 +302,22 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
               size="small"
               showHeader={true}
             />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available or no purchased items found.'
+                }
+              </Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {quotaStatus?.no_purchase_info 
+                  ? 'No API call was made to avoid unnecessary requests'
+                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                }
+              </Text>
+            </div>
           )}
         </Card>
       </div>
