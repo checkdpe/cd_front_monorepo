@@ -19,7 +19,7 @@ export const DpeList: React.FC = () => {
   });
   const [filters, setFilters] = useState<DpeListParams>({
     q: 'all',
-    from: 'control',
+    from: 'all',
     s: '',
     sort_col: 'last_modified',
     sort_order: 'desc',
@@ -211,9 +211,21 @@ export const DpeList: React.FC = () => {
   // Generate columns from response data
   const columns = generateColumns(responseData?.table_columns || []);
 
+  // Get dynamic title based on selected dropdown value
+  const getDynamicTitle = () => {
+    switch (filters.from) {
+      case 'control':
+        return 'Orders';
+      case 'all':
+        return 'All';
+      default:
+        return responseData?.title || 'DPE List';
+    }
+  };
+
   return (
     <Card 
-      title={responseData?.title || 'DPE List'}
+      title={getDynamicTitle()}
       extra={responseData?.subtitle && (
         <div style={{ fontSize: '14px', color: '#666' }}>
           {responseData.subtitle}
@@ -242,7 +254,7 @@ export const DpeList: React.FC = () => {
             }}
             style={{ width: 120 }}
           >
-            <Option value="control">Control</Option>
+            <Option value="control">Orders</Option>
             <Option value="all">All</Option>
           </Select>
         </Space>
