@@ -1,6 +1,16 @@
 import { DpeListResponse, DpeListParams } from '../types/dpe';
 import { authorizedFetch } from '../auth';
 
+// Function to get current API base URL based on environment preference
+export const getApiBaseUrl = (): string => {
+  const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+  if (useDevEnvironment) {
+    return import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+  } else {
+    return import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr';
+  }
+};
+
 export interface LogItem {
   id?: string;
   timestamp?: string;
@@ -16,9 +26,8 @@ export interface LogsResponse {
   [key: string]: any;
 }
 
-const API_BASE_URL = `${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice`;
-
 export const fetchDpeList = async (params: DpeListParams = {}): Promise<DpeListResponse> => {
+  const API_BASE_URL = `${getApiBaseUrl()}/backoffice`;
   const searchParams = new URLSearchParams();
   
   // Set default parameters
@@ -68,10 +77,10 @@ export const fetchDpeList = async (params: DpeListParams = {}): Promise<DpeListR
 };
 
 export const fetchLogs = async (refAdeme: string): Promise<LogsResponse> => {
-  const apiBaseDev = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+  const apiBaseUrl = getApiBaseUrl();
   const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
   
-  const url = `${apiBaseDev}/${apiLogsSuffix}`;
+  const url = `${apiBaseUrl}/${apiLogsSuffix}`;
   
   const searchParams = new URLSearchParams();
   searchParams.append('ref_ademe', refAdeme);

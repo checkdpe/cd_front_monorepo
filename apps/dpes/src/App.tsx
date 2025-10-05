@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { TopMenu } from "@acme/top-menu";
+import { TopMenu, EnvironmentProvider, useEnvironment } from "@acme/top-menu";
 import { DpeList } from "./components/DpeList";
 import { SessionBridge } from "./SessionBridge";
 import { fetchAuthSession, getCurrentUser, fetchUserAttributes } from "aws-amplify/auth";
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
   const [bridgeReady, setBridgeReady] = useState<boolean>(false);
   const [bridgeAuthenticated, setBridgeAuthenticated] = useState<boolean>(false);
+  const { useDevEnvironment, setUseDevEnvironment } = useEnvironment();
 
   // Get the auth URL from environment variables
   const authUrl = import.meta.env.VITE_AUTH_URL || "/auth";
@@ -84,6 +85,9 @@ export const App: React.FC = () => {
           if (!clientId) return undefined;
           return `https://${domain}/logout?client_id=${encodeURIComponent(clientId)}&logout_uri=${encodeURIComponent(logoutRedirect)}`;
         })()}
+        showSettings={true}
+        useDevEnvironment={useDevEnvironment}
+        onEnvironmentChange={setUseDevEnvironment}
       />
       {/* Invisible iframe to pull session from auth origin when on different ports */}
       {!bridgeReady && (
@@ -101,5 +105,13 @@ export const App: React.FC = () => {
         <DpeList />
       </div>
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <EnvironmentProvider>
+      <AppContent />
+    </EnvironmentProvider>
   );
 };
