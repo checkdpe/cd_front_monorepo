@@ -77,7 +77,7 @@ jobs:
     - name: Init app env files
       run: |
         set -e
-        apps=("simul" "auth", "dpes")
+        apps=("simul" "auth" "dpes")
         for app in "${apps[@]}"; do
           src="apps/$app/.$LD_ENV.env"
           dst="apps/$app/.env"
