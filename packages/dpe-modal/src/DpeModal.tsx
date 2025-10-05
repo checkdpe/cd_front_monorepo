@@ -18,6 +18,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     count: number;
   } | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
 
   // Fetch data when modal opens and specific tab is active
   useEffect(() => {
@@ -469,15 +470,71 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
       );
     };
 
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
     const renderLogDetails = (logKey: string) => {
       const details = parseLogDetails(logKey);
       if (!details || details.length === 0) {
         return <Text type="secondary">No detailed data available</Text>;
       }
 
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
       return (
         <Space direction="vertical" style={{ width: '100%' }}>
-          {details.map((detail, index) => (
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
             <Card key={index} size="small" style={{ marginBottom: 8 }}>
               <Descriptions size="small" column={1}>
                 {detail.hr_ts && (
@@ -551,7 +608,9 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
                                 )}
                                 {contentItem.message && (
                                   <Descriptions.Item label="Message">
-                                    <Text>{contentItem.message}</Text>
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
                                   </Descriptions.Item>
                                 )}
                                 {contentItem.ts && (
