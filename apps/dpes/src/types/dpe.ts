@@ -7,6 +7,7 @@ export interface DpeItem {
   msg_file_id: string;
   last_modified: string;
   time?: number;
+  purchase?: boolean;
 }
 
 export interface DpeColumn {

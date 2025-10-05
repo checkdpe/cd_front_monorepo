@@ -284,7 +284,11 @@ export const DpeList: React.FC = () => {
         scroll={{ x: 800 }}
         onRow={(record) => ({
           onClick: () => handleRowClick(record),
-          style: { cursor: 'pointer' },
+          style: { 
+            cursor: 'pointer',
+            // Show light blue background for rows where purchase is true
+            backgroundColor: record.purchase ? '#e6f7ff' : undefined,
+          },
         })}
       />
       
