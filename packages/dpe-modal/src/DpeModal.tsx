@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown } from 'antd';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown, InputNumber } from 'antd';
 import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } from '@ant-design/icons';
 import { DpeModalProps, QuotaStatus, InfoItem } from './types';
 
@@ -12,6 +12,8 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingValue, setEditingValue] = useState<any>(null);
   const [editingKey, setEditingKey] = useState<string>('');
+  const [editingStatus, setEditingStatus] = useState<number | null>(null);
+  const [editingRecordId, setEditingRecordId] = useState<string | number | null>(null);
   const [logsData, setLogsData] = useState<{
     logs: string[];
     cd_log: any;
@@ -197,15 +199,22 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   const handleEditClick = (key: string, value: any) => {
     setEditingKey(key);
     setEditingValue(value);
+    if (key.startsWith('reliability_record_') && value && typeof value === 'object') {
+      setEditingRecordId(value.id);
+      setEditingStatus(typeof value.status === 'number' ? value.status : Number(value.status) || 0);
+    } else {
+      setEditingRecordId(null);
+      setEditingStatus(null);
+    }
     setEditModalVisible(true);
   };
 
   const handleEditSave = async () => {
     if (quotaStatus && editingKey) {
       // Check if this is a reliability record that needs to be updated via PATCH
-      if (editingKey.startsWith('reliability_record_') && editingValue && typeof editingValue === 'object') {
+      if (editingKey.startsWith('reliability_record_')) {
         try {
-          await updateReliabilityRecord(editingValue);
+          await updateReliabilityRecord({ id: editingRecordId, status: editingStatus });
           message.success('Reliability record updated successfully');
         } catch (error) {
           message.error('Failed to update reliability record');
@@ -224,6 +233,8 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     setEditModalVisible(false);
     setEditingKey('');
     setEditingValue(null);
+    setEditingRecordId(null);
+    setEditingStatus(null);
   };
 
   const updateReliabilityRecord = async (recordData: any) => {
@@ -266,6 +277,8 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     setEditModalVisible(false);
     setEditingKey('');
     setEditingValue(null);
+    setEditingRecordId(null);
+    setEditingStatus(null);
   };
 
   const renderInfosTab = () => {
@@ -290,7 +303,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
           quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
             infoItems.push({
               key: `reliability_record_${index}`,
-              name: `Reliability Record ${index + 1}`,
+              name: record.user_email || `Reliability Record ${index + 1}`,
               value: {
                 user_email: record.user_email,
                 created_at: record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A',
@@ -343,7 +356,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
 
     const columns = [
       {
-        title: 'Name',
+        title: 'Email',
         dataIndex: 'name',
         key: 'name',
         width: 200,
@@ -359,10 +372,11 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '12px' }}>
-                    <div><strong>Email:</strong> {value.user_email}</div>
-                    <div><strong>Date:</strong> {value.created_at}</div>
                     <div><strong>Type:</strong> {value.cd_type}</div>
-                    <div><strong>Status:</strong> <Tag color={value.status === 0 ? 'red' : 'green'}>{value.status}</Tag></div>
+                    <div style={{ textAlign: 'right' }}>
+                      <strong>Status:</strong> <Tag color={value.status === 0 ? 'red' : 'green'}>{value.status}</Tag>
+                    </div>
+                    <div style={{ gridColumn: '1 / span 2' }}><strong>Date:</strong> {value.created_at}</div>
                   </div>
                 </div>
                 <Button
@@ -997,32 +1011,37 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
             </pre>
           </div>
         </div>
-        <div>
-          <Text strong>New Value (JSON format):</Text>
-          {editingKey.startsWith('reliability_record_') && (
-            <div style={{ marginTop: 8, marginBottom: 8, padding: 8, backgroundColor: '#e6f7ff', borderRadius: 4 }}>
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                <strong>Status Values:</strong> 0 (inactive), 1 (active), 2 (pending), etc. - Use any integer value.
-                <br />
-                <strong>Note:</strong> Changes will be sent to the server via PATCH request.
-              </Text>
+        {editingKey.startsWith('reliability_record_') ? (
+          <div>
+            <Text strong>Set Status (integer):</Text>
+            <div style={{ marginTop: 8 }}>
+              <InputNumber
+                value={editingStatus as number | null}
+                onChange={(val) => setEditingStatus(typeof val === 'number' ? val : null)}
+                step={1}
+                style={{ width: 200 }}
+              />
             </div>
-          )}
-          <Input.TextArea
-            rows={8}
-            placeholder="Enter new value in JSON format..."
-            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
-            onChange={(e) => {
-              try {
-                const parsed = JSON.parse(e.target.value);
-                setEditingValue(parsed);
-              } catch {
-                setEditingValue(e.target.value);
-              }
-            }}
-            style={{ marginTop: 8 }}
-          />
-        </div>
+          </div>
+        ) : (
+          <div>
+            <Text strong>New Value (JSON format):</Text>
+            <Input.TextArea
+              rows={8}
+              placeholder="Enter new value in JSON format..."
+              value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+              onChange={(e) => {
+                try {
+                  const parsed = JSON.parse(e.target.value);
+                  setEditingValue(parsed);
+                } catch {
+                  setEditingValue(e.target.value);
+                }
+              }}
+              style={{ marginTop: 8 }}
+            />
+          </div>
+        )}
       </Modal>
     </>
   );
