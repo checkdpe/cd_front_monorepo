@@ -81,20 +81,53 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
 
       const data = await response.json();
       
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
       // Filter table_values to only include items where purchase = 1
       if (data.table_values && Array.isArray(data.table_values)) {
         const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
         const filteredData = {
           ...data,
-          table_values: filteredTableValues
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
         };
         setQuotaStatus(filteredData);
       } else {
-        setQuotaStatus(data);
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
       }
     } catch (error) {
       message.error('Failed to load quota status');
       console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
     } finally {
       setLoading(false);
     }
@@ -167,17 +200,66 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     setEditModalVisible(true);
   };
 
-  const handleEditSave = () => {
+  const handleEditSave = async () => {
     if (quotaStatus && editingKey) {
-      setQuotaStatus(prev => ({
-        ...prev,
-        [editingKey]: editingValue
-      }));
-      message.success('Value updated successfully');
+      // Check if this is a reliability record that needs to be updated via PATCH
+      if (editingKey.startsWith('reliability_record_') && editingValue && typeof editingValue === 'object') {
+        try {
+          await updateReliabilityRecord(editingValue);
+          message.success('Reliability record updated successfully');
+        } catch (error) {
+          message.error('Failed to update reliability record');
+          console.error('Error updating reliability record:', error);
+          return; // Don't close modal on error
+        }
+      } else {
+        // Handle other types of edits (local state updates)
+        setQuotaStatus(prev => ({
+          ...prev,
+          [editingKey]: editingValue
+        }));
+        message.success('Value updated successfully');
+      }
     }
     setEditModalVisible(false);
     setEditingKey('');
     setEditingValue(null);
+  };
+
+  const updateReliabilityRecord = async (recordData: any) => {
+    if (!dpeItem?.id) {
+      throw new Error('No DPE ID available');
+    }
+
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+    const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'PATCH',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'content-type': 'application/json',
+        'x-authorization': 'dperdition'
+      },
+      body: JSON.stringify({
+        res: [recordData]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const updatedData = await response.json();
+    
+    // Update the local state with the response
+    if (updatedData.res && Array.isArray(updatedData.res)) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        purchase_reliability_data: updatedData.res,
+        total_reliability_records: updatedData.res.length
+      }));
+    }
   };
 
   const handleEditCancel = () => {
@@ -193,19 +275,47 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     if (quotaStatus) {
       // Check if this is a "no purchase info" case - don't add any items to the table
       if (!quotaStatus.no_purchase_info) {
-        // Add quota status summary
-        infoItems.push({
-          key: 'quota_status_summary',
-          name: 'Quota Status Summary',
-          value: {
-            total_items: quotaStatus.table_values?.length || 0,
-            purchased_items: quotaStatus.table_values?.filter((item: any) => item.purchase === 1).length || 0,
-            api_response: quotaStatus
-          }
-        });
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
         
-        // Add individual purchased items if any exist
+        // Handle purchase reliability data (when API returns structured response)
+        if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          // Add each reliability record as a separate editable item
+          quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
+            infoItems.push({
+              key: `reliability_record_${index}`,
+              name: `Reliability Record ${index + 1}`,
+              value: {
+                user_email: record.user_email,
+                created_at: record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A',
+                cd_type: record.cd_type,
+                status: record.status,
+                id: record.id // Keep ID for reference
+              }
+            });
+          });
+        }
+        
+        // Add quota status summary for complex responses
         if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
           const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
           if (purchasedItems.length > 0) {
             infoItems.push({
@@ -214,6 +324,19 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
               value: purchasedItems
             });
           }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
         }
       }
     }
@@ -229,33 +352,58 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         title: 'Value',
         dataIndex: 'value',
         key: 'value',
-        render: (value: any, record: InfoItem) => (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              {typeof value === 'object' ? (
-                <pre style={{ 
-                  background: '#f5f5f5', 
-                  padding: 8, 
-                  borderRadius: 4, 
-                  margin: 0,
-                  fontSize: '12px',
-                  maxHeight: 100,
-                  overflow: 'auto'
-                }}>
-                  {JSON.stringify(value, null, 2)}
-                </pre>
-              ) : (
-                <Text>{String(value)}</Text>
-              )}
+        render: (value: any, record: InfoItem) => {
+          // Special handling for reliability records
+          if (record.key.startsWith('reliability_record_') && typeof value === 'object') {
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '12px' }}>
+                    <div><strong>Email:</strong> {value.user_email}</div>
+                    <div><strong>Date:</strong> {value.created_at}</div>
+                    <div><strong>Type:</strong> {value.cd_type}</div>
+                    <div><strong>Status:</strong> <Tag color={value.status === 0 ? 'red' : 'green'}>{value.status}</Tag></div>
+                  </div>
+                </div>
+                <Button
+                  type="text"
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => handleEditClick(record.key, value)}
+                />
+              </div>
+            );
+          }
+          
+          // Default rendering for other values
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                {typeof value === 'object' ? (
+                  <pre style={{ 
+                    background: '#f5f5f5', 
+                    padding: 8, 
+                    borderRadius: 4, 
+                    margin: 0,
+                    fontSize: '12px',
+                    maxHeight: 100,
+                    overflow: 'auto'
+                  }}>
+                    {JSON.stringify(value, null, 2)}
+                  </pre>
+                ) : (
+                  <Text>{String(value)}</Text>
+                )}
+              </div>
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                size="small"
+                onClick={() => handleEditClick(record.key, value)}
+              />
             </div>
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              size="small"
-              onClick={() => handleEditClick(record.key, value)}
-            />
-          </div>
-        ),
+          );
+        },
       },
     ];
 
@@ -308,14 +456,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
               <Text type="secondary">
                 {quotaStatus?.no_purchase_info 
                   ? 'No purchase information found in DPE record - API call skipped'
-                  : 'No quota status data available or no purchased items found.'
-                }
-              </Text>
-              <br />
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                {quotaStatus?.no_purchase_info 
-                  ? 'No API call was made to avoid unnecessary requests'
-                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                  : 'No quota status data available.'
                 }
               </Text>
             </div>
@@ -817,6 +958,15 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         </div>
         <div>
           <Text strong>New Value (JSON format):</Text>
+          {editingKey.startsWith('reliability_record_') && (
+            <div style={{ marginTop: 8, marginBottom: 8, padding: 8, backgroundColor: '#e6f7ff', borderRadius: 4 }}>
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                <strong>Status Values:</strong> 0 (inactive), 1 (active), 2 (pending), etc. - Use any integer value.
+                <br />
+                <strong>Note:</strong> Changes will be sent to the server via PATCH request.
+              </Text>
+            </div>
+          )}
           <Input.TextArea
             rows={8}
             placeholder="Enter new value in JSON format..."
