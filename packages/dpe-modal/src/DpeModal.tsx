@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
-import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } from '@ant-design/icons';
 import { DpeModalProps, QuotaStatus, InfoItem } from './types';
 
 const { Title, Text } = Typography;
@@ -884,6 +884,47 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     );
   };
 
+  const handleExternalLinkClick = () => {
+    if (dpeItem?.id) {
+      const externalUrl = `https://bo.scandpe.fr/simul/index.html?ref_ademe=${dpeItem.id}`;
+      window.open(externalUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const dropdownMenuItems = [
+    {
+      key: 'external-link',
+      label: 'Open in External Tab',
+      icon: <LinkOutlined />,
+      onClick: handleExternalLinkClick,
+    },
+  ];
+
+  const customTitle = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Dropdown
+        menu={{ items: dropdownMenuItems }}
+        trigger={['click']}
+        placement="bottomLeft"
+      >
+        <Button
+          type="text"
+          icon={<MenuOutlined />}
+          size="small"
+          title="Open menu"
+          style={{ 
+            color: '#1890ff',
+            padding: '4px 8px',
+            height: 'auto',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+        />
+      </Dropdown>
+      <span>DPE Details - {dpeItem?.id || ''}</span>
+    </div>
+  );
+
   const tabItems = [
     {
       key: 'infos',
@@ -915,7 +956,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   return (
     <>
       <Modal
-        title={`DPE Details - ${dpeItem?.id || ''}`}
+        title={customTitle}
         open={visible}
         onCancel={onClose}
         footer={null}
