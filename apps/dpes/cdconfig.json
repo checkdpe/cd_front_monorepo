@@ -10,4 +10,11 @@
   "post_execution": "Post Execution",
   "final": "Final"
 }
+},
+"visible_tabs":{
+    "infos": {"all": true, "admin": true},
+    "workflow": {"all": false, "admin": true},
+    "actions": {"all": true, "admin": true},
+    "details": {"all": false, "admin": true},
+    "logs": {"all": true, "admin": true}
 }}

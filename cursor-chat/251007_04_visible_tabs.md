@@ -1,3 +1,35 @@
+# Configure visibility settings for tabs
+_Exported on 07/10/2025 at 8:29:10 CEST from Cursor (1.7.33)_
+
+---
+
+**User**
+
+@cdconfig.json 
+admin notion will come later on
+just base on "all" visibility status => display related tab accordingly
+
+---
+
+**Cursor**
+
+I'll help you update the tab visibility logic to use only the "all" property from the config. Let me first find where the tabs are being rendered and how the config is currently being used.
+
+Let me check the DpeModal component where the tabs are likely rendered:
+
+```json
+"visible_tabs":{
+    "infos": {"all": true, "admin": true},
+    "workflow": {"all": false, "admin": true},
+    "actions": {"all": true, "admin": true},
+    "details": {"all": false, "admin": true},
+    "logs": {"all": true, "admin": true}
+}
+```
+
+Now I can see where the tabs are defined. I need to filter the `tabItems` array based on the "all" property from the `visible_tabs` configuration. Let me update the code to only show tabs where `visible_tabs[key].all === true`:
+
+```typescriptreact
 import React, { useState, useEffect } from 'react';
 import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown, InputNumber } from 'antd';
 import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } from '@ant-design/icons';
@@ -1538,3 +1570,27 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     </>
   );
 };
+
+```
+
+Perfect! I've updated the DPE modal to filter tabs based on the "all" property from the `cdconfig.json`. Now the tabs will be displayed according to:
+
+- **infos**: ✅ Visible (`all: true`)
+- **workflow**: ❌ Hidden (`all: false`) 
+- **actions**: ✅ Visible (`all: true`)
+- **details**: ❌ Hidden (`all: false`)
+- **logs**: ✅ Visible (`all: true`)
+
+The admin functionality can be added later - for now, it only checks the "all" property to determine which tabs to show.
+
+Let me check for any linting issues:
+
+Good news! The changes I made don't introduce any new linting errors. All the errors shown were already present in the file before my modifications. 
+
+The tab visibility logic is now working based on the "all" property from the `cdconfig.json`. Based on your current configuration:
+
+✅ **Visible tabs**: Infos, Actions, Logs  
+❌ **Hidden tabs**: Workflow, Details
+
+When you're ready to implement the admin functionality later, you can easily extend the filter logic to also check for an `isAdmin` flag or similar condition alongside the "all" property.
+
