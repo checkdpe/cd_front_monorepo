@@ -20,6 +20,12 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     count: number;
   } | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [detailsData, setDetailsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
 
   // Fetch data when modal opens and specific tab is active
@@ -29,6 +35,8 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         fetchQuotaStatus();
       } else if (activeTab === 'logs') {
         fetchLogs();
+      } else if (activeTab === 'details') {
+        fetchDetails();
       }
     }
   }, [visible, dpeItem, activeTab]);
@@ -192,6 +200,63 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
   };
 
+  const fetchDetails = async () => {
+    if (!dpeItem?.id) return;
+    
+    setDetailsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiDetailsSuffix = 'backoffice/get_redis_all_details';
+      
+      const url = `${apiBaseUrl}/${apiDetailsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setDetailsData(data);
+    } catch (error) {
+      message.error('Failed to load details');
+      console.error('Error loading details:', error);
+      setDetailsData(null);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
   const handleTabChange = (key: string) => {
     setActiveTab(key);
   };
@@ -245,6 +310,9 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
     const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
     
+    console.log('Sending data to dpe_quota:', recordData);
+    console.log('JSON body being sent:', JSON.stringify(recordData));
+    
     const response = await fetch(fullUrl, {
       method: 'PATCH',
       headers: {
@@ -252,9 +320,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         'content-type': 'application/json',
         'x-authorization': 'dperdition'
       },
-      body: JSON.stringify({
-        res: [recordData]
-      })
+      body: JSON.stringify(recordData)
     });
 
     if (!response.ok) {
@@ -264,11 +330,11 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     const updatedData = await response.json();
     
     // Update the local state with the response
-    if (updatedData.res && Array.isArray(updatedData.res)) {
+    // Since we're now sending the object directly, the response should contain the updated data
+    if (updatedData) {
       setQuotaStatus(prev => ({
         ...prev,
-        purchase_reliability_data: updatedData.res,
-        total_reliability_records: updatedData.res.length
+        ...updatedData
       }));
     }
   };
@@ -510,20 +576,378 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     </div>
   );
 
-  const renderDetailsTab = () => (
-    <div>
-      <Title level={4}>Details</Title>
-      <Card>
-        <div style={{ padding: 20, textAlign: 'center' }}>
-          <Text type="secondary">Detailed information will be displayed here.</Text>
-          <br />
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
-          </Text>
+  const renderDetailsTab = () => {
+    const parseDetailsData = (logKey: string) => {
+      if (!detailsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = detailsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing details data:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
         </div>
-      </Card>
-    </div>
-  );
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderDetailsData = (logKey: string) => {
+      const details = parseDetailsData(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Details 
+            {detailsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({detailsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchDetails}
+            loading={detailsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {detailsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading details...</Text>
+              </div>
+            </div>
+          ) : !detailsData || detailsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No details found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={detailsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseDetailsData(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderDetailsData(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={detailsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
 
   const renderLogsTab = () => {
     const parseLogDetails = (logKey: string) => {
