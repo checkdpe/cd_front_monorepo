@@ -1,20 +1,47 @@
-{"labels":{
-  "timers_step_label": {
-  "attach_db_redis": "Connect to DB",
-  "extract_client_ip_middleware": "Initialize",
-  "redis_status_change_1": "DPE loading task received",
-  "redis_status_change_2": "Will download",
-  "redis_status_change_3": "Inserted",
-  "redis_status_change_9": "Will calculate reliability",
-  "redis_status_change_10": "Reliability done",
-  "post_execution": "Post Execution",
-  "final": "Final"
+{
+    "labels": {
+        "timers_step_label": {
+            "attach_db_redis": "Connect to DB",
+            "extract_client_ip_middleware": "Initialize",
+            "redis_status_change_1": "Task received, downloading...",
+            "redis_status_change_2": "Downloaded",
+            "redis_status_change_3": "Inserted",
+            "redis_status_change_9": "Will calculate reliability",
+            "redis_status_change_10": "Reliability done",
+            "post_execution": "Post Execution",
+            "final": "Final"
+        }
+    },
+    "visible_tabs": {
+        "infos": {
+            "all": true,
+            "admin": true
+        },
+        "workflow": {
+            "all": false,
+            "admin": true
+        },
+        "actions": {
+            "all": true,
+            "admin": true
+        },
+        "details": {
+            "all": false,
+            "admin": true
+        },
+        "logs": {
+            "all": true,
+            "admin": true
+        }
+    },
+    "actions":{
+        "delete": {
+            "task_name":"status_manage.delete",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        }
+    }
 }
-},
-"visible_tabs":{
-    "infos": {"all": true, "admin": true},
-    "workflow": {"all": false, "admin": true},
-    "actions": {"all": true, "admin": true},
-    "details": {"all": false, "admin": true},
-    "logs": {"all": true, "admin": true}
-}}
