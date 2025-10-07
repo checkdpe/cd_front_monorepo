@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown, InputNumber } from 'antd';
 import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } from '@ant-design/icons';
 import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+import cdconfig from '../../../apps/dpes/cdconfig.json';
 
 const { Title, Text } = Typography;
 
@@ -27,6 +28,20 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   } | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Helper function to get translated label for timer keys
+  const getTimerLabel = (timerKey: string): string => {
+    try {
+      const labels = cdconfig?.labels?.timers_step_label as Record<string, string> | undefined;
+      if (labels && timerKey in labels && labels[timerKey]) {
+        return labels[timerKey];
+      }
+    } catch (error) {
+      console.error('Error getting timer label:', error);
+    }
+    // Fallback to formatted key if no translation exists
+    return timerKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
 
   // Fetch data when modal opens and specific tab is active
   useEffect(() => {
@@ -281,6 +296,8 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         try {
           await updateReliabilityRecord({ id: editingRecordId, status: editingStatus });
           message.success('Reliability record updated successfully');
+          // Refresh quota status from endpoint after successful update
+          await fetchQuotaStatus();
         } catch (error) {
           message.error('Failed to update reliability record');
           console.error('Error updating reliability record:', error);
@@ -365,8 +382,24 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         
         // Handle purchase reliability data (when API returns structured response)
         if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          // Sort by date (descending) then by email (ascending)
+          const sortedRecords = [...quotaStatus.purchase_reliability_data].sort((a: any, b: any) => {
+            // First, sort by date (descending - most recent first)
+            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            
+            if (dateB !== dateA) {
+              return dateB - dateA; // Descending order (most recent first)
+            }
+            
+            // If dates are equal, sort by email (ascending)
+            const emailA = (a.user_email || '').toLowerCase();
+            const emailB = (b.user_email || '').toLowerCase();
+            return emailA.localeCompare(emailB);
+          });
+          
           // Add each reliability record as a separate editable item
-          quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
+          sortedRecords.forEach((record: any, index: number) => {
             infoItems.push({
               key: `reliability_record_${index}`,
               name: record.user_email || `Reliability Record ${index + 1}`,
@@ -628,7 +661,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         .map(([name, timestamp]) => ({
           name,
           timestamp: timestamp as number,
-          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+          displayName: getTimerLabel(name)
         }))
         .sort((a, b) => a.timestamp - b.timestamp);
 
@@ -1001,7 +1034,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         .map(([name, timestamp]) => ({
           name,
           timestamp: timestamp as number,
-          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+          displayName: getTimerLabel(name)
         }))
         .sort((a, b) => a.timestamp - b.timestamp);
 
