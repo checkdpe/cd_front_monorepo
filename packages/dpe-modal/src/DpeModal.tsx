@@ -1362,12 +1362,38 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
   };
 
+  const handleDemoLinkClick = () => {
+    if (dpeItem?.id) {
+      const demoUrl = `https://demo.ledpe.fr/#/dashboard/${dpeItem.id}`;
+      window.open(demoUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleAppLinkClick = () => {
+    if (dpeItem?.id) {
+      const appUrl = `https://app.checkdpe.fr/#/dashboard/${dpeItem.id}`;
+      window.open(appUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const dropdownMenuItems = [
     {
-      key: 'external-link',
-      label: 'Open in External Tab',
+      key: 'simulation',
+      label: 'Simulation',
       icon: <LinkOutlined />,
       onClick: handleExternalLinkClick,
+    },
+    {
+      key: 'demo',
+      label: 'Demo',
+      icon: <LinkOutlined />,
+      onClick: handleDemoLinkClick,
+    },
+    {
+      key: 'app',
+      label: 'App',
+      icon: <LinkOutlined />,
+      onClick: handleAppLinkClick,
     },
   ];
 
