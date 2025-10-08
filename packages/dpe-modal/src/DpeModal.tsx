@@ -6,7 +6,7 @@ import cdconfig from '../../../apps/dpes/cdconfig.json';
 import { waitForAccessToken, invalidateTokenCache } from './auth';
 
 const { Title, Text } = Typography;
-const { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } = Icons;
+const { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined, SendOutlined } = Icons;
 
 export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
   const [activeTab, setActiveTab] = useState('infos');
@@ -32,6 +32,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
   const [actionDoneData, setActionDoneData] = useState<{ [key: string]: { loading: boolean; data: any; error?: string } }>({});
   const [actionDoneExpanded, setActionDoneExpanded] = useState<{ [key: string]: boolean }>({});
+  const [selectedAction, setSelectedAction] = useState<{ key: string; config: any } | null>(null);
 
   // Helper function to get translated label for timer keys
   const getTimerLabel = (timerKey: string): string => {
@@ -52,6 +53,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     if (visible) {
       setActionDoneData({});
       setActionDoneExpanded({});
+      setSelectedAction(null);
     }
   }, [visible]);
 
@@ -797,13 +799,34 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
   };
 
-  const handleActionClick = async (actionKey: string, actionConfig: any) => {
+  const handleActionClick = (actionKey: string, actionConfig: any) => {
     if (!dpeItem?.id) {
       message.error('No DPE ID available');
       return;
     }
 
-    // Clear/reset all previous action done data when clicking a new button
+    // Reset/clear all previous action done data when switching actions
+    setActionDoneData({});
+    setActionDoneExpanded({});
+
+    // Just select the action, don't send it yet
+    setSelectedAction({ key: actionKey, config: actionConfig });
+    
+    // If action has "done" config, load the report immediately
+    if (actionConfig.done) {
+      handleLoadReport(actionKey, actionConfig);
+    }
+  };
+
+  const handleSendAction = async () => {
+    if (!selectedAction || !dpeItem?.id) {
+      message.error('No action selected or DPE ID available');
+      return;
+    }
+
+    const { key: actionKey, config: actionConfig } = selectedAction;
+
+    // Clear/reset all previous action done data when sending
     setActionDoneData({});
     setActionDoneExpanded({});
 
@@ -867,6 +890,16 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
   };
 
+  const handleLoadReport = async (actionKey: string, actionConfig: any) => {
+    if (!dpeItem?.id || !actionConfig.done) {
+      message.error('No DPE ID available or action has no report configuration');
+      return;
+    }
+
+    // Load report directly without sending action
+    pollActionDone(actionKey, actionConfig.done);
+  };
+
   // Helper function to get icon component dynamically from icon name string
   const getIconComponent = (iconName: string | undefined) => {
     if (!iconName) return null;
@@ -909,6 +942,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
                   onClick={() => handleActionClick(actionKey, actionConfig)}
                   title={actionConfig.tooltip || ''}
                   size="small"
+                  type={selectedAction?.key === actionKey ? 'primary' : 'default'}
                 >
                   {actionKey.charAt(0).toUpperCase() + actionKey.slice(1)}
                 </Button>
@@ -917,21 +951,53 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
           )}
         </Card>
 
+        {/* Send Button */}
+        {selectedAction && (
+          <Card style={{ marginTop: 16, backgroundColor: '#f0f5ff' }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <div>
+                <Text strong>Selected Action: {selectedAction.key}</Text>
+                {selectedAction.config.tooltip && (
+                  <div style={{ marginTop: 4 }}>
+                    <Text type="secondary">{selectedAction.config.tooltip}</Text>
+                  </div>
+                )}
+              </div>
+              <Button 
+                type="primary" 
+                icon={<SendOutlined />}
+                onClick={handleSendAction}
+                size="large"
+              >
+                Send Action
+              </Button>
+            </Space>
+          </Card>
+        )}
+
         {/* Display polling status for actions with "done" configuration */}
         {Object.entries(actionDoneData).map(([actionKey, doneData]) => {
           const actionConfig = actions[actionKey as keyof typeof actions];
           const keySuffix = (actionConfig as any)?.done?.key_suffix || actionKey;
           const reportShort = (actionConfig as any)?.done?.report_short;
-          const isExpanded = actionDoneExpanded[actionKey] || false;
           
           // Extract short data if report_short is defined
           let displayData = doneData.data;
           let shortData = null;
+          let shortDataLength = 0;
           if (reportShort && doneData.data) {
             // Handle report_short as array or string
             const path = Array.isArray(reportShort) ? reportShort[0] : reportShort;
             shortData = getJsonValueByPath(doneData.data, path);
+            const stringified = JSON.stringify(shortData, null, 2);
+            shortDataLength = stringified ? stringified.length : 0;
           }
+          
+          // If content is less than 200 chars, expand by default
+          const shouldAutoExpand = shortDataLength < 200;
+          const isExpanded = actionDoneExpanded[actionKey] !== undefined 
+            ? actionDoneExpanded[actionKey] 
+            : shouldAutoExpand;
           
           return (
             <Card key={actionKey} style={{ marginTop: 16 }}>
