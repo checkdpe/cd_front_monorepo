@@ -41,7 +41,7 @@
         "delete": {
             "task_name":"tasks.utils.delete_status",
             "icon":"DeleteOutlined",
-            "tooltip":"Delete the status manage",
+            "tooltip":"utils.delete_status:Delete the status manage",
             "visibility":{
                 "all": true,
                 "admin": true
@@ -51,7 +51,7 @@
         "summary_init":{
             "task_name":"tasks.document_processing.create",
             "icon": "FilePdfOutlined",
-            "tooltip":"Initialize the ai-summary",
+            "tooltip":"document_processing.create: Initialize the ai-summary",
             "visibility":{
                 "all": true,
                 "admin": true
@@ -61,7 +61,7 @@
         "load_dpe":{
             "task_name":"tasks.xml_processing.ingest",
             "icon":"DownloadOutlined",
-            "tooltip":"Load the dpe, via running successive tasks : insertion, bdnb, reliability...",
+            "tooltip":"xml_processing.ingest: Load the dpe, via running successive tasks : insertion, bdnb, reliability...",
             "visibility":{
                 "all": true,
                 "admin": true
@@ -71,7 +71,7 @@
         "to_o3cl_full":{
             "task_name":"tasks.xml_processing.to_o3cl_full",
             "icon":"CloudDownloadOutlined",
-            "tooltip":"Writes the full DPE to the expected o3cl format in MongoDB",
+            "tooltip":"xml_processing.to_o3cl_full: Writes the full DPE to the expected o3cl format in MongoDB",
             "visibility":{
                 "all": true,
                 "admin": true
@@ -81,7 +81,7 @@
         "o3cl_init":{
             "task_name":"tasks.ext_o3cl_managing.ademe_run",
             "icon":"CloudDownloadOutlined",
-            "tooltip":"Run the o3cl",
+            "tooltip":"ext_o3cl_managing.ademe_run: Run the o3cl",
             "visibility":{
                 "all": true,
                 "admin": true
