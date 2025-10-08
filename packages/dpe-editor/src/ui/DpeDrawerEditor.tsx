@@ -474,7 +474,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                 if (forcedObj && typeof forcedObj === "object") {
                   Object.entries(forcedObj).forEach(([fk, fv]) => {
                     if (fk === configuredInputKey) return;
-                    if (nextSc.input[fk] == null) nextSc.input[fk] = fv;
+                    // Always apply forced inputs, overwriting existing values
+                    nextSc.input[fk] = fv;
                   });
                 }
               } catch {}
@@ -934,7 +935,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           if (forcedObj && typeof forcedObj === "object") {
             Object.entries(forcedObj).forEach(([fk, fv]) => {
               if (fk === configuredInputKey) return;
-              if (nextSc.input[fk] == null) nextSc.input[fk] = fv;
+              // Always apply forced inputs, overwriting existing values
+              nextSc.input[fk] = fv;
             });
           }
         } catch {}
