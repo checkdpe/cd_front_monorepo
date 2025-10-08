@@ -1,6 +1,7 @@
 {
     "endpoints":{
-        "tasks": {"url":"/backoffice/send_task"}
+        "tasks": {"url":"/backoffice/send_task"},
+        "redis_details": {"url":"/backoffice/get_redis_detail"}
     },
     "labels": {
         "timers_step_label": {
@@ -86,7 +87,12 @@
                 "all": true,
                 "admin": true
             },
-            "params":[]
+            "params":[],
+            "done":{
+                "data_source":"redis_details",
+                "key_suffix": "report_o3cl",
+                "report_short": ["data.logement.sortie.ep_conso"]
+            }
         }
     }
 }

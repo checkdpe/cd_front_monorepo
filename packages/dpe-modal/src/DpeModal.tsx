@@ -30,6 +30,8 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
   } | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+  const [actionDoneData, setActionDoneData] = useState<{ [key: string]: { loading: boolean; data: any; error?: string } }>({});
+  const [actionDoneExpanded, setActionDoneExpanded] = useState<{ [key: string]: boolean }>({});
 
   // Helper function to get translated label for timer keys
   const getTimerLabel = (timerKey: string): string => {
@@ -44,6 +46,14 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     // Fallback to formatted key if no translation exists
     return timerKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
+
+  // Clear action done data when modal opens
+  useEffect(() => {
+    if (visible) {
+      setActionDoneData({});
+      setActionDoneExpanded({});
+    }
+  }, [visible]);
 
   // Fetch data when modal opens and specific tab is active
   useEffect(() => {
@@ -657,11 +667,145 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     </div>
   );
 
+  // Helper function to get current environment
+  const getEnvironment = (): string => {
+    const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+    return useDevEnvironment ? "dev" : "stg";
+  };
+
+  // Helper function to extract value from JSON using path (e.g., "user.address.city")
+  const getJsonValueByPath = (obj: any, path: string | undefined): any => {
+    if (!path || typeof path !== 'string') return obj;
+    const keys = path.split('.');
+    let result = obj;
+    for (const key of keys) {
+      if (result && typeof result === 'object' && key in result) {
+        result = result[key];
+      } else {
+        return undefined;
+      }
+    }
+    return result;
+  };
+
+  // Helper function to check if response is a simple error object that needs retry
+  const isSimpleErrorResponse = (data: any): boolean => {
+    if (!data || typeof data !== 'object') return false;
+    
+    // Check if it's a simple object with only one key like {"error": "*"}
+    const keys = Object.keys(data);
+    if (keys.length === 1 && keys[0] === 'error') {
+      return true;
+    }
+    
+    // You can add more conditions here if needed
+    return false;
+  };
+
+  // Function to poll action completion status
+  const pollActionDone = async (actionKey: string, doneConfig: any, retryCount: number = 0) => {
+    if (!dpeItem?.id) return;
+
+    const { data_source, key_suffix } = doneConfig;
+    const MAX_RETRIES = parseInt(import.meta.env.VITE_RETRIES || '5', 10); // Maximum number of retries from env
+    const RETRY_INTERVAL = 2000; // 2 seconds between retries
+    
+    // Set loading state
+    setActionDoneData(prev => ({
+      ...prev,
+      [actionKey]: { loading: true, data: null }
+    }));
+
+    try {
+      // Get API base URL
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      
+      // Get endpoint from config
+      const endpointConfig = (cdconfig?.endpoints as any)?.[data_source];
+      if (!endpointConfig || !endpointConfig.url) {
+        throw new Error(`Endpoint "${data_source}" not found in config`);
+      }
+      
+      const endpoint = endpointConfig.url;
+      
+      // Build the log parameter: {environment}_{key_suffix}
+      const environment = getEnvironment();
+      const logParam = `${environment}_${key_suffix}`;
+      
+      // Build full URL with query parameters
+      const url = new URL(endpoint, apiBaseUrl);
+      url.searchParams.append('ref_ademe', dpeItem.id);
+      url.searchParams.append('log', logParam);
+      
+      // Get access token
+      const accessToken = await waitForAccessToken();
+      if (!accessToken) {
+        throw new Error('Authentication token not found');
+      }
+
+      // Poll the endpoint
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'authorization': `Bearer ${accessToken}`,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (response.status === 401) {
+        invalidateTokenCache();
+        throw new Error('Session expired');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Check if response is a simple error object that needs retry
+      if (isSimpleErrorResponse(data) && retryCount < MAX_RETRIES) {
+        console.log(`Action "${actionKey}" received simple error response, retrying in ${RETRY_INTERVAL}ms... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        
+        // Schedule retry after interval
+        setTimeout(() => {
+          pollActionDone(actionKey, doneConfig, retryCount + 1);
+        }, RETRY_INTERVAL);
+        
+        return; // Keep loading state
+      }
+      
+      // Update state with data (even if it's still an error response after max retries)
+      setActionDoneData(prev => ({
+        ...prev,
+        [actionKey]: { loading: false, data }
+      }));
+      
+      if (isSimpleErrorResponse(data)) {
+        console.log(`Action "${actionKey}" max retries reached, showing error response:`, data);
+      } else {
+        console.log(`Action "${actionKey}" done data:`, data);
+      }
+    } catch (error) {
+      // Update state with error
+      setActionDoneData(prev => ({
+        ...prev,
+        [actionKey]: { loading: false, data: null, error: String(error) }
+      }));
+      console.error(`Error polling action "${actionKey}":`, error);
+    }
+  };
+
   const handleActionClick = async (actionKey: string, actionConfig: any) => {
     if (!dpeItem?.id) {
       message.error('No DPE ID available');
       return;
     }
+
+    // Clear/reset all previous action done data when clicking a new button
+    setActionDoneData({});
+    setActionDoneExpanded({});
 
     // Get access token with retry
     const accessToken = await waitForAccessToken();
@@ -710,8 +854,13 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
       }
 
       const data = await response.json();
-      message.success({ content: `Action "${actionKey}" executed successfully`, key: actionKey, duration: 3 });
+      message.success({ content: `Action "${actionKey}" sent successfully`, key: actionKey, duration: 3 });
       console.log('Action response:', data);
+
+      // Check if action has "done" configuration for polling
+      if (actionConfig.done) {
+        pollActionDone(actionKey, actionConfig.done);
+      }
     } catch (error) {
       message.error({ content: `Failed to execute action "${actionKey}": ${error}`, key: actionKey, duration: 5 });
       console.error(`Error executing action ${actionKey}:`, error);
@@ -767,6 +916,89 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
             </Space>
           )}
         </Card>
+
+        {/* Display polling status for actions with "done" configuration */}
+        {Object.entries(actionDoneData).map(([actionKey, doneData]) => {
+          const actionConfig = actions[actionKey as keyof typeof actions];
+          const keySuffix = (actionConfig as any)?.done?.key_suffix || actionKey;
+          const reportShort = (actionConfig as any)?.done?.report_short;
+          const isExpanded = actionDoneExpanded[actionKey] || false;
+          
+          // Extract short data if report_short is defined
+          let displayData = doneData.data;
+          let shortData = null;
+          if (reportShort && doneData.data) {
+            // Handle report_short as array or string
+            const path = Array.isArray(reportShort) ? reportShort[0] : reportShort;
+            shortData = getJsonValueByPath(doneData.data, path);
+          }
+          
+          return (
+            <Card key={actionKey} style={{ marginTop: 16 }}>
+              <Title level={5}>{keySuffix}</Title>
+              {doneData.loading ? (
+                <div style={{ textAlign: 'center', padding: 20 }}>
+                  <Spin tip="Loading data...">
+                    <div style={{ minHeight: 50 }} />
+                  </Spin>
+                </div>
+              ) : doneData.error ? (
+                <div style={{ padding: 10 }}>
+                  <Text type="danger">Error: {doneData.error}</Text>
+                </div>
+              ) : doneData.data ? (
+                <div style={{ padding: 10 }}>
+                  {/* Show short version if report_short is defined and not expanded */}
+                  {reportShort && !isExpanded ? (
+                    <>
+                      <pre style={{ 
+                        background: '#f5f5f5', 
+                        padding: 10, 
+                        borderRadius: 4, 
+                        maxHeight: 400, 
+                        overflow: 'auto',
+                        fontSize: 12
+                      }}>
+                        {JSON.stringify(shortData, null, 2)}
+                      </pre>
+                      <Button 
+                        type="link" 
+                        size="small"
+                        onClick={() => setActionDoneExpanded(prev => ({ ...prev, [actionKey]: true }))}
+                        style={{ marginTop: 8 }}
+                      >
+                        Show more
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <pre style={{ 
+                        background: '#f5f5f5', 
+                        padding: 10, 
+                        borderRadius: 4, 
+                        maxHeight: 400, 
+                        overflow: 'auto',
+                        fontSize: 12
+                      }}>
+                        {JSON.stringify(displayData, null, 2)}
+                      </pre>
+                      {reportShort && (
+                        <Button 
+                          type="link" 
+                          size="small"
+                          onClick={() => setActionDoneExpanded(prev => ({ ...prev, [actionKey]: false }))}
+                          style={{ marginTop: 8 }}
+                        >
+                          Show less
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </Card>
+          );
+        })}
       </div>
     );
   };
