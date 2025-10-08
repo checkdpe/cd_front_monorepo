@@ -18,7 +18,7 @@ import { SimulationDetailCard } from "@acme/simulation-detail";
 const { Title, Paragraph } = Typography;
 
 export const App: React.FC = () => {
-  const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const [jsonText, setJsonText] = useState<string>("[]");
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
   const [skip, setSkip] = useState<number>(1);
@@ -293,8 +293,8 @@ export const App: React.FC = () => {
             const mergedInput = { ...forced, ...baseInput };
             return { ...sc, input: mergedInput };
           });
-          const { parameters, ...rest } = run || {};
-          return { ...rest, scenarios: nextScenarios };
+          // Keep the parameters object so DpeDrawerEditor can read input_forced
+          return { ...run, scenarios: nextScenarios };
         });
 
         if (transformedRuns.length > 0) {
