@@ -1,8 +1,4 @@
 node_modules
 .DS_Store
-apps/dashboard/.env
-packages/mon-dpe/.env
+*/.env
 dist/
-apps/auth/.env
-apps/simulation/.env
-apps/simul/.env

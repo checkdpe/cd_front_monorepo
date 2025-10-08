@@ -1,0 +1,113 @@
+{
+    "endpoints":{
+        "tasks": {"url":"/backoffice/send_task"},
+        "redis_details": {"url":"/backoffice/get_redis_detail"}
+    },
+    "labels": {
+        "timers_step_label": {
+            "attach_db_redis": "Connect to DB",
+            "extract_client_ip_middleware": "Initialize",
+            "redis_status_change_1": "Task received, downloading...",
+            "redis_status_change_2": "Downloaded",
+            "redis_status_change_3": "Inserted",
+            "redis_status_change_9": "Will calculate reliability",
+            "redis_status_change_10": "Reliability done",
+            "post_execution": "Post Execution",
+            "final": "Final"
+        }
+    },
+    "visible_tabs": {
+        "infos": {
+            "all": true,
+            "admin": true
+        },
+        "workflow": {
+            "all": false,
+            "admin": true
+        },
+        "actions": {
+            "all": true,
+            "admin": true
+        },
+        "details": {
+            "all": false,
+            "admin": true
+        },
+        "logs": {
+            "all": true,
+            "admin": true
+        }
+    },
+    "actions":{
+        "delete": {
+            "task_name":"tasks.utils.delete_status",
+            "icon":"DeleteOutlined",
+            "tooltip":"utils.delete_status:Delete the status manage",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        },
+        "summary_init":{
+            "task_name":"tasks.document_processing.create",
+            "icon": "FilePdfOutlined",
+            "tooltip":"document_processing.create: Initialize the ai-summary",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        },
+        "load_dpe":{
+            "task_name":"tasks.xml_processing.ingest",
+            "icon":"DownloadOutlined",
+            "tooltip":"xml_processing.ingest: Load the dpe, via running successive tasks : insertion, bdnb, reliability...",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        },
+        "to_o3cl_full":{
+            "task_name":"tasks.xml_processing.to_o3cl_full",
+            "icon":"CloudDownloadOutlined",
+            "tooltip":"xml_processing.to_o3cl_full: Writes the full DPE to the expected o3cl format in MongoDB",
+            "visibility":{
+                "all": false,
+                "admin": true
+            },
+            "params":[]
+        },
+        "o3cl_init":{
+            "task_name":"tasks.ext_o3cl_managing.ademe_run",
+            "icon":"CloudDownloadOutlined",
+            "tooltip":"ext_o3cl_managing.ademe_run: Run the o3cl",
+            "visibility":{
+                "all": false,
+                "admin": true
+            },
+            "params":[],
+            "done":{
+                "data_source":"redis_details",
+                "key_suffix": "report_o3cl",
+                "report_short": ["data.logement.sortie.ep_conso"]
+            }
+        },
+        "post_process":{
+            "task_name":"tasks.end_processing.process",
+            "icon":"CloudDownloadOutlined",
+            "tooltip":"ext_o3cl_managing.ademe_run: Run the o3cl, after copy to mongo",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[],
+            "done":{
+                "data_source":"redis_details",
+                "key_suffix": "report_o3cl",
+                "report_short": ["data.logement.sortie.ep_conso"]
+            }
+        }
+    }
+}

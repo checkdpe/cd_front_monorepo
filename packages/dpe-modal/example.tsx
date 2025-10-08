@@ -15,7 +15,9 @@ const ExampleUsage: React.FC = () => {
     handicap: 0,
     note: 8.5,
     msg_file_id: 'msg-123',
-    last_modified: '2024-01-15T10:30:00Z'
+    last_modified: '2024-01-15T10:30:00Z',
+    time: 1200.5,
+    purchase: true
   };
 
   const handleOpenModal = () => {

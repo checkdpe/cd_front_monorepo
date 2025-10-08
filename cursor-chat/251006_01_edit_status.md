@@ -1,0 +1,11548 @@
+# Issue with dpe_quota retrieval
+_Exported on 06/10/2025 at 10:54:16 CEST from Cursor (1.7.33)_
+
+---
+
+**User**
+
+if it has "purchase" true (blue background) , a dpe_quota is expected in "Infos" tab
+by the way it returns "0" here
+
+but i cant see the value in "Infos"
+
+curl 'https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N' \
+  -H 'accept: application/json, text/plain, */*' \
+  -H 'accept-language: en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6' \
+  -H 'cache-control: no-cache' \
+  -H 'origin: https://bo.scandpe.fr' \
+  -H 'pragma: no-cache' \
+  -H 'priority: u=1, i' \
+  -H 'referer: https://bo.scandpe.fr/' \
+  -H 'sec-ch-ua: "Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "macOS"' \
+  -H 'sec-fetch-dest: empty' \
+  -H 'sec-fetch-mode: cors' \
+  -H 'sec-fetch-site: cross-site' \
+  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' \
+  -H 'x-authorization: dperdition'
+
+---
+
+**Cursor**
+
+I'll help you investigate the DPE quota issue. Let me first understand the current codebase structure and then examine the relevant files to see how the DPE quota is being handled in the "Infos" tab.
+
+
+Now let me examine the current DpeModal implementation to understand the issue better:
+
+
+Now let me check the types file to understand the structure better:
+
+
+Now let me test the API call to see what's happening:
+
+
+The API is returning "0" which means there's no quota data for this DPE. Let me create a todo list to track the issues and then implement a solution:
+
+
+Based on my analysis, I can see the issue. The problem is in the `hasPurchaseInfo` function and how the quota status is being handled. Let me examine the current logic:
+
+1. The `hasPurchaseInfo` function checks if the DPE item has purchase-related fields
+2. If it doesn't find purchase info, it sets `no_purchase_info: true` and skips the API call
+3. But when `purchase: true` is present, it should make the API call
+4. The API is returning "0" which suggests there might be an issue with the API or the data
+
+Let me fix the logic to properly handle the case where `purchase: true` but the API returns "0":
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          api_response: data,
+          message: 'API returned 0 - No quota data available',
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Add quota status summary
+        infoItems.push({
+          key: 'quota_status_summary',
+          name: 'Quota Status Summary',
+          value: {
+            total_items: quotaStatus.table_values?.length || 0,
+            purchased_items: quotaStatus.table_values?.filter((item: any) => item.purchase === 1).length || 0,
+            api_response: quotaStatus
+          }
+        });
+        
+        // Add individual purchased items if any exist
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available or no purchased items found.'
+                }
+              </Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {quotaStatus?.no_purchase_info 
+                  ? 'No API call was made to avoid unnecessary requests'
+                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me update the `renderInfosTab` function to better handle the case where the API returns "0" but the DPE has `purchase: true`:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          api_response: data,
+          message: 'API returned 0 - No quota data available',
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Add quota status summary
+        infoItems.push({
+          key: 'quota_status_summary',
+          name: 'Quota Status Summary',
+          value: {
+            total_items: quotaStatus.table_values?.length || 0,
+            purchased_items: quotaStatus.table_values?.filter((item: any) => item.purchase === 1).length || 0,
+            api_response: quotaStatus,
+            purchase_status: dpeItem?.purchase,
+            api_url: quotaStatus.api_url
+          }
+        });
+        
+        // Handle special case where API returns "0" but DPE has purchase=true
+        if (quotaStatus.api_response === 0 || quotaStatus.api_response === "0") {
+          infoItems.push({
+            key: 'api_zero_response',
+            name: 'API Response Issue',
+            value: {
+              message: quotaStatus.message,
+              api_response: quotaStatus.api_response,
+              purchase_status: quotaStatus.purchase_status,
+              api_url: quotaStatus.api_url,
+              note: 'DPE has purchase=true but API returned 0. This may indicate a data inconsistency.'
+            }
+          });
+        }
+        
+        // Add individual purchased items if any exist
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available or no purchased items found.'
+                }
+              </Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {quotaStatus?.no_purchase_info 
+                  ? 'No API call was made to avoid unnecessary requests'
+                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me also update the fallback message to be more informative:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          api_response: data,
+          message: 'API returned 0 - No quota data available',
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Add quota status summary
+        infoItems.push({
+          key: 'quota_status_summary',
+          name: 'Quota Status Summary',
+          value: {
+            total_items: quotaStatus.table_values?.length || 0,
+            purchased_items: quotaStatus.table_values?.filter((item: any) => item.purchase === 1).length || 0,
+            api_response: quotaStatus,
+            purchase_status: dpeItem?.purchase,
+            api_url: quotaStatus.api_url
+          }
+        });
+        
+        // Handle special case where API returns "0" but DPE has purchase=true
+        if (quotaStatus.api_response === 0 || quotaStatus.api_response === "0") {
+          infoItems.push({
+            key: 'api_zero_response',
+            name: 'API Response Issue',
+            value: {
+              message: quotaStatus.message,
+              api_response: quotaStatus.api_response,
+              purchase_status: quotaStatus.purchase_status,
+              api_url: quotaStatus.api_url,
+              note: 'DPE has purchase=true but API returned 0. This may indicate a data inconsistency.'
+            }
+          });
+        }
+        
+        // Add individual purchased items if any exist
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : quotaStatus?.api_response === 0 || quotaStatus?.api_response === "0"
+                    ? 'DPE has purchase=true but API returned 0 - Possible data inconsistency'
+                    : 'No quota status data available or no purchased items found.'
+                }
+              </Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {quotaStatus?.no_purchase_info 
+                  ? 'No API call was made to avoid unnecessary requests'
+                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                }
+              </Text>
+              {quotaStatus?.purchase_status && (
+                <div style={{ marginTop: 8 }}>
+                  <Tag color="blue">Purchase Status: {quotaStatus.purchase_status ? 'true' : 'false'}</Tag>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me check for any linting errors:
+
+
+Great! Now let me update the todo list to mark the first task as completed and move to the next one:
+
+
+Perfect! I've successfully implemented a solution to address the DPE quota issue. Here's a summary of what I've done:
+
+## Problem Analysis
+The issue was that when a DPE has `purchase: true` (blue background), the quota API call was being made but returning "0", and this wasn't being properly displayed in the "Infos" tab.
+
+## Solution Implemented
+
+### 1. **Enhanced API Response Handling**
+- Added specific handling for when the API returns "0" or empty responses
+- The system now recognizes this as a potential data inconsistency when `purchase: true`
+
+### 2. **Improved Infos Tab Display**
+- **Quota Status Summary**: Shows comprehensive information including:
+  - Total items count
+  - Purchased items count  
+  - API response details
+  - Purchase status from the DPE record
+  - API URL for debugging
+
+- **API Response Issue Detection**: When API returns "0" but DPE has `purchase: true`, it now shows:
+  - Clear message about the data inconsistency
+  - API response value
+  - Purchase status
+  - API URL
+  - Note explaining the potential issue
+
+### 3. **Better Error Handling**
+- Enhanced error states with more detailed information
+- Added purchase status tracking throughout the process
+- Improved fallback messages with more context
+
+### 4. **Visual Improvements**
+- Added purchase status tags in the UI
+- Better structured information display
+- More informative error messages
+
+## Key Features
+
+✅ **Detects Data Inconsistency**: When `purchase: true` but API returns "0", it clearly indicates this as a potential data issue
+
+✅ **Comprehensive Information**: Shows all relevant details including API URL, purchase status, and response data
+
+✅ **Better User Experience**: Clear messaging about what's happening and why
+
+✅ **Debugging Support**: Includes API URLs and detailed response information for troubleshooting
+
+The solution now properly handles the case where a DPE has `purchase: true` (blue background) but the quota API returns "0". Instead of showing nothing or confusing messages, users will now see:
+
+1. **Clear indication** that there's a data inconsistency
+2. **Detailed information** about the API response
+3. **Purchase status** confirmation
+4. **API endpoint** for debugging purposes
+
+This should resolve the issue where users couldn't see quota information in the "Infos" tab when `purchase: true` was set but the API returned "0".
+
+---
+
+**User**
+
+you return this "{
+  "total_items": 0,
+  "purchased_items": 0,
+  "api_response": {
+    "api_response": 0,
+    "message": "API returned 0 - No quota data available",
+    "dpe_id": "2594E0712549N",
+    "purchase_status": true,
+    "api_url": "https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N"
+  },
+  "purchase_status": true,
+  "api_url": "https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N"
+}"
+
+actually i just need an array with value "0", which i can edit and patch
+
+---
+
+**Cursor**
+
+I understand! You want a simple array with the value "0" that you can edit and patch, rather than the complex nested object structure. Let me modify the code to provide a cleaner, editable format.
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Add quota status summary
+        infoItems.push({
+          key: 'quota_status_summary',
+          name: 'Quota Status Summary',
+          value: {
+            total_items: quotaStatus.table_values?.length || 0,
+            purchased_items: quotaStatus.table_values?.filter((item: any) => item.purchase === 1).length || 0,
+            api_response: quotaStatus,
+            purchase_status: dpeItem?.purchase,
+            api_url: quotaStatus.api_url
+          }
+        });
+        
+        // Handle special case where API returns "0" but DPE has purchase=true
+        if (quotaStatus.api_response === 0 || quotaStatus.api_response === "0") {
+          infoItems.push({
+            key: 'api_zero_response',
+            name: 'API Response Issue',
+            value: {
+              message: quotaStatus.message,
+              api_response: quotaStatus.api_response,
+              purchase_status: quotaStatus.purchase_status,
+              api_url: quotaStatus.api_url,
+              note: 'DPE has purchase=true but API returned 0. This may indicate a data inconsistency.'
+            }
+          });
+        }
+        
+        // Add individual purchased items if any exist
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : quotaStatus?.api_response === 0 || quotaStatus?.api_response === "0"
+                    ? 'DPE has purchase=true but API returned 0 - Possible data inconsistency'
+                    : 'No quota status data available or no purchased items found.'
+                }
+              </Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {quotaStatus?.no_purchase_info 
+                  ? 'No API call was made to avoid unnecessary requests'
+                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                }
+              </Text>
+              {quotaStatus?.purchase_status && (
+                <div style={{ marginTop: 8 }}>
+                  <Tag color="blue">Purchase Status: {quotaStatus.purchase_status ? 'true' : 'false'}</Tag>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : quotaStatus?.api_response === 0 || quotaStatus?.api_response === "0"
+                    ? 'DPE has purchase=true but API returned 0 - Possible data inconsistency'
+                    : 'No quota status data available or no purchased items found.'
+                }
+              </Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {quotaStatus?.no_purchase_info 
+                  ? 'No API call was made to avoid unnecessary requests'
+                  : `API endpoint: ${import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr'}/backoffice/dpe_quota?ref_ademe=${dpeItem?.id}`
+                }
+              </Text>
+              {quotaStatus?.purchase_status && (
+                <div style={{ marginTop: 8 }}>
+                  <Tag color="blue">Purchase Status: {quotaStatus.purchase_status ? 'true' : 'false'}</Tag>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me also update the fallback message to be simpler:
+
+
+```typescriptreact
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+```
+
+Let me read the current state of the file to see what's there:
+
+
+I see the issue. Let me update the fallback message to be simpler since we're now handling the "0" case differently:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me check for any linting errors:
+
+
+Perfect! Now let me update the todo list to mark the tasks as completed:
+
+
+Excellent! I've simplified the quota display as requested. Here's what I changed:
+
+## ✅ **Simplified Quota Display**
+
+### **Before** (Complex nested structure):
+```json
+{
+  "total_items": 0,
+  "purchased_items": 0,
+  "api_response": {
+    "api_response": 0,
+    "message": "API returned 0 - No quota data available",
+    "dpe_id": "2594E0712549N",
+    "purchase_status": true,
+    "api_url": "https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N"
+  },
+  "purchase_status": true,
+  "api_url": "https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N"
+}
+```
+
+### **After** (Clean, editable format):
+```json
+{
+  "key": "dpe_quota",
+  "name": "DPE Quota", 
+  "value": "0"
+}
+```
+
+## **Key Changes Made:**
+
+1. **🎯 Simple Quota Value**: When the API returns "0", it now creates a clean entry with just the quota value
+2. **✏️ Editable Format**: The value "0" is displayed as a simple string that you can easily edit and patch
+3. **🧹 Removed Complexity**: Eliminated all the nested objects, API URLs, and verbose messages
+4. **📝 Clean Display**: Shows just "DPE Quota: 0" in the Infos tab with an edit button
+
+## **How It Works Now:**
+
+- When `purchase: true` and API returns "0" → Shows simple "DPE Quota: 0" entry
+- You can click the edit button to modify the value
+- The edit modal will show the current value "0" in a clean JSON format
+- You can change it to any value you need and save it
+
+This gives you exactly what you wanted - a simple, editable array with the value "0" that you can easily patch! 🎉
+
+```json
+{
+  "total_items": 0,
+  "purchased_items": 0,
+  "api_response": {
+    "api_response": 0,
+    "message": "API returned 0 - No quota data available",
+    "dpe_id": "2594E0712549N",
+    "purchase_status": true,
+    "api_url": "https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N"
+  },
+  "purchase_status": true,
+  "api_url": "https://api-dev.etiquettedpe.fr/backoffice/dpe_quota?ref_ademe=2594E0712549N"
+}
+```
+
+```json
+{
+  "key": "dpe_quota",
+  "name": "DPE Quota", 
+  "value": "0"
+}
+```
+
+---
+
+**User**
+
+dpe_quota => adjust results parsing to such a response
+
+{
+    "res": [
+        {
+            "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+            "user_email": "germain.blanchet@gmail.com",
+            "created_at": "2025-10-05T21:58:14.519509",
+            "status": 0,
+            "cd_type": "purchase_reliability"
+        }
+    ]
+}
+
+---
+
+**Cursor**
+
+I understand! The API is actually returning a structured response with an array of purchase reliability data, not just "0". Let me update the parsing logic to handle this proper response format.
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me update the `renderInfosTab` function to properly display the purchase reliability data:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Handle purchase reliability data (when API returns structured response)
+        if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          infoItems.push({
+            key: 'purchase_reliability',
+            name: 'Purchase Reliability Data',
+            value: quotaStatus.purchase_reliability_data
+          });
+          
+          // Add summary info
+          infoItems.push({
+            key: 'reliability_summary',
+            name: 'Reliability Summary',
+            value: {
+              total_records: quotaStatus.total_reliability_records,
+              records_with_status_0: quotaStatus.purchase_reliability_data.filter((item: any) => item.status === 0).length,
+              records_with_status_1: quotaStatus.purchase_reliability_data.filter((item: any) => item.status === 1).length,
+              cd_types: [...new Set(quotaStatus.purchase_reliability_data.map((item: any) => item.cd_type))]
+            }
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Let me check for any linting errors:
+
+
+Perfect! Now let me update the todo list to mark the tasks as completed:
+
+
+Excellent! I've updated the DPE quota parsing to handle the structured response format you provided. Here's what I implemented:
+
+## ✅ **Updated DPE Quota Parsing**
+
+### **New Response Format Handling:**
+The system now properly parses responses like:
+```json
+{
+    "res": [
+        {
+            "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+            "user_email": "germain.blanchet@gmail.com",
+            "created_at": "2025-10-05T21:58:14.519509",
+            "status": 0,
+            "cd_type": "purchase_reliability"
+        }
+    ]
+}
+```
+
+### **What You'll See in the Infos Tab:**
+
+1. **📊 Purchase Reliability Data**: Shows the full array of reliability records
+2. **📈 Reliability Summary**: Provides a summary with:
+   - Total records count
+   - Records with status 0
+   - Records with status 1  
+   - Unique CD types found
+
+### **Key Features:**
+
+✅ **Structured Data Display**: Shows the complete `res` array with all purchase reliability information
+
+✅ **Summary Statistics**: Automatically calculates:
+- Total reliability records
+- Status distribution (0 vs 1)
+- Unique CD types
+
+✅ **Editable Format**: Each data entry can be edited using the edit button
+
+✅ **Backward Compatibility**: Still handles the simple "0" response and other formats
+
+### **Example Display:**
+When you open the Infos tab for a DPE with `purchase: true`, you'll now see:
+
+- **Purchase Reliability Data**: The full array of reliability records
+- **Reliability Summary**: 
+  ```json
+  {
+    "total_records": 1,
+    "records_with_status_0": 1,
+    "records_with_status_1": 0,
+    "cd_types": ["purchase_reliability"]
+  }
+  ```
+
+This gives you complete visibility into the purchase reliability data and makes it easy to edit any values you need to patch! 🎉
+
+```json
+{
+    "res": [
+        {
+            "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+            "user_email": "germain.blanchet@gmail.com",
+            "created_at": "2025-10-05T21:58:14.519509",
+            "status": 0,
+            "cd_type": "purchase_reliability"
+        }
+    ]
+}
+```
+
+```json
+  {
+    "total_records": 1,
+    "records_with_status_0": 1,
+    "records_with_status_1": 0,
+    "cd_types": ["purchase_reliability"]
+  }
+```
+
+---
+
+**User**
+
+pls put : user_email, created_at (just day), cd_type , status as column (array) and i can edit each
+
+---
+
+**Cursor**
+
+I understand! You want to display the purchase reliability data as a table with columns for `user_email`, `created_at` (just the day), `cd_type`, and `status`, where each row can be edited individually. Let me update the code to show this data in a proper table format.
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Handle purchase reliability data (when API returns structured response)
+        if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          // Add each reliability record as a separate editable item
+          quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
+            infoItems.push({
+              key: `reliability_record_${index}`,
+              name: `Reliability Record ${index + 1}`,
+              value: {
+                user_email: record.user_email,
+                created_at: record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A',
+                cd_type: record.cd_type,
+                status: record.status,
+                id: record.id // Keep ID for reference
+              }
+            });
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              {typeof value === 'object' ? (
+                <pre style={{ 
+                  background: '#f5f5f5', 
+                  padding: 8, 
+                  borderRadius: 4, 
+                  margin: 0,
+                  fontSize: '12px',
+                  maxHeight: 100,
+                  overflow: 'auto'
+                }}>
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              ) : (
+                <Text>{String(value)}</Text>
+              )}
+            </div>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditClick(record.key, value)}
+            />
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me also update the table columns to better display the structured data:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = () => {
+    if (quotaStatus && editingKey) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        [editingKey]: editingValue
+      }));
+      message.success('Value updated successfully');
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Handle purchase reliability data (when API returns structured response)
+        if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          // Add each reliability record as a separate editable item
+          quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
+            infoItems.push({
+              key: `reliability_record_${index}`,
+              name: `Reliability Record ${index + 1}`,
+              value: {
+                user_email: record.user_email,
+                created_at: record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A',
+                cd_type: record.cd_type,
+                status: record.status,
+                id: record.id // Keep ID for reference
+              }
+            });
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => {
+          // Special handling for reliability records
+          if (record.key.startsWith('reliability_record_') && typeof value === 'object') {
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '12px' }}>
+                    <div><strong>Email:</strong> {value.user_email}</div>
+                    <div><strong>Date:</strong> {value.created_at}</div>
+                    <div><strong>Type:</strong> {value.cd_type}</div>
+                    <div><strong>Status:</strong> <Tag color={value.status === 0 ? 'red' : 'green'}>{value.status}</Tag></div>
+                  </div>
+                </div>
+                <Button
+                  type="text"
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => handleEditClick(record.key, value)}
+                />
+              </div>
+            );
+          }
+          
+          // Default rendering for other values
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                {typeof value === 'object' ? (
+                  <pre style={{ 
+                    background: '#f5f5f5', 
+                    padding: 8, 
+                    borderRadius: 4, 
+                    margin: 0,
+                    fontSize: '12px',
+                    maxHeight: 100,
+                    overflow: 'auto'
+                  }}>
+                    {JSON.stringify(value, null, 2)}
+                  </pre>
+                ) : (
+                  <Text>{String(value)}</Text>
+                )}
+              </div>
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                size="small"
+                onClick={() => handleEditClick(record.key, value)}
+              />
+            </div>
+          );
+        },
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Let me check for any linting errors:
+
+
+Perfect! Now let me update the todo list to mark the tasks as completed:
+
+
+Excellent! I've updated the DPE quota display to show the purchase reliability data exactly as you requested. Here's what I implemented:
+
+## ✅ **Table View with Editable Columns**
+
+### **What You'll See:**
+Each reliability record is now displayed as a separate row with the following columns:
+
+| Column | Value | Example |
+|--------|-------|---------|
+| **Email** | `user_email` | `germain.blanchet@gmail.com` |
+| **Date** | `created_at` (day only) | `10/5/2025` |
+| **Type** | `cd_type` | `purchase_reliability` |
+| **Status** | `status` | `0` (with color-coded tag) |
+
+### **Key Features:**
+
+✅ **Individual Row Display**: Each reliability record appears as "Reliability Record 1", "Reliability Record 2", etc.
+
+✅ **Clean Column Layout**: Shows all 4 fields in a neat grid format:
+- **Email**: User's email address
+- **Date**: Just the day (formatted as MM/DD/YYYY)
+- **Type**: CD type (e.g., "purchase_reliability")
+- **Status**: Status value with color-coded tags (red for 0, green for 1)
+
+✅ **Editable Rows**: Each row has an edit button that opens the edit modal with the current values
+
+✅ **Visual Status Indicators**: Status values are displayed with colored tags for easy identification
+
+### **Example Display:**
+For your sample data:
+```json
+{
+    "res": [
+        {
+            "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+            "user_email": "germain.blanchet@gmail.com",
+            "created_at": "2025-10-05T21:58:14.519509",
+            "status": 0,
+            "cd_type": "purchase_reliability"
+        }
+    ]
+}
+```
+
+You'll see:
+- **Reliability Record 1**
+  - **Email:** germain.blanchet@gmail.com
+  - **Date:** 10/5/2025
+  - **Type:** purchase_reliability
+  - **Status:** 0 (red tag)
+  - **[Edit Button]**
+
+### **Editing:**
+When you click the edit button, you can modify any of the values:
+- Change the email
+- Update the date
+- Modify the CD type
+- Change the status
+
+This gives you exactly what you wanted - a clean table view with the 4 key columns that you can edit individually! 🎉
+
+```json
+{
+    "res": [
+        {
+            "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+            "user_email": "germain.blanchet@gmail.com",
+            "created_at": "2025-10-05T21:58:14.519509",
+            "status": 0,
+            "cd_type": "purchase_reliability"
+        }
+    ]
+}
+```
+
+---
+
+**User**
+
+edit allow change the status from 0 to another int 
+then call same endpoint dpe_quota with data to update the object (PATCH method)
+
+---
+
+**Cursor**
+
+I understand! You want to enable editing the status field and then make a PATCH request to the same endpoint to update the data. Let me implement this functionality.
+
+
+First, let me update the `handleEditSave` function to handle PATCH requests for reliability records:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = async () => {
+    if (quotaStatus && editingKey) {
+      // Check if this is a reliability record that needs to be updated via PATCH
+      if (editingKey.startsWith('reliability_record_') && editingValue && typeof editingValue === 'object') {
+        try {
+          await updateReliabilityRecord(editingValue);
+          message.success('Reliability record updated successfully');
+        } catch (error) {
+          message.error('Failed to update reliability record');
+          console.error('Error updating reliability record:', error);
+          return; // Don't close modal on error
+        }
+      } else {
+        // Handle other types of edits (local state updates)
+        setQuotaStatus(prev => ({
+          ...prev,
+          [editingKey]: editingValue
+        }));
+        message.success('Value updated successfully');
+      }
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const updateReliabilityRecord = async (recordData: any) => {
+    if (!dpeItem?.id) {
+      throw new Error('No DPE ID available');
+    }
+
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+    const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'PATCH',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'content-type': 'application/json',
+        'x-authorization': 'dperdition'
+      },
+      body: JSON.stringify({
+        res: [recordData]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const updatedData = await response.json();
+    
+    // Update the local state with the response
+    if (updatedData.res && Array.isArray(updatedData.res)) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        purchase_reliability_data: updatedData.res,
+        total_reliability_records: updatedData.res.length
+      }));
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Handle purchase reliability data (when API returns structured response)
+        if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          // Add each reliability record as a separate editable item
+          quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
+            infoItems.push({
+              key: `reliability_record_${index}`,
+              name: `Reliability Record ${index + 1}`,
+              value: {
+                user_email: record.user_email,
+                created_at: record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A',
+                cd_type: record.cd_type,
+                status: record.status,
+                id: record.id // Keep ID for reference
+              }
+            });
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => {
+          // Special handling for reliability records
+          if (record.key.startsWith('reliability_record_') && typeof value === 'object') {
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '12px' }}>
+                    <div><strong>Email:</strong> {value.user_email}</div>
+                    <div><strong>Date:</strong> {value.created_at}</div>
+                    <div><strong>Type:</strong> {value.cd_type}</div>
+                    <div><strong>Status:</strong> <Tag color={value.status === 0 ? 'red' : 'green'}>{value.status}</Tag></div>
+                  </div>
+                </div>
+                <Button
+                  type="text"
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => handleEditClick(record.key, value)}
+                />
+              </div>
+            );
+          }
+          
+          // Default rendering for other values
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                {typeof value === 'object' ? (
+                  <pre style={{ 
+                    background: '#f5f5f5', 
+                    padding: 8, 
+                    borderRadius: 4, 
+                    margin: 0,
+                    fontSize: '12px',
+                    maxHeight: 100,
+                    overflow: 'auto'
+                  }}>
+                    {JSON.stringify(value, null, 2)}
+                  </pre>
+                ) : (
+                  <Text>{String(value)}</Text>
+                )}
+              </div>
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                size="small"
+                onClick={() => handleEditClick(record.key, value)}
+              />
+            </div>
+          );
+        },
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Now let me enhance the edit modal to provide better input validation and guidance for status changes:
+
+
+Let me read the current edit modal section first:
+
+
+Let me find the edit modal section:
+
+
+Now let me enhance the edit modal to provide better guidance for status editing:
+
+
+```typescriptreact
+import React, { useState, useEffect } from 'react';
+import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline } from 'antd';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { DpeModalProps, QuotaStatus, InfoItem } from './types';
+
+const { Title, Text } = Typography;
+
+export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
+  const [activeTab, setActiveTab] = useState('infos');
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingValue, setEditingValue] = useState<any>(null);
+  const [editingKey, setEditingKey] = useState<string>('');
+  const [logsData, setLogsData] = useState<{
+    logs: string[];
+    cd_log: any;
+    count: number;
+  } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showRetryMessages, setShowRetryMessages] = useState<{ [key: string]: boolean }>({});
+
+  // Fetch data when modal opens and specific tab is active
+  useEffect(() => {
+    if (visible && dpeItem) {
+      if (activeTab === 'infos') {
+        fetchQuotaStatus();
+      } else if (activeTab === 'logs') {
+        fetchLogs();
+      }
+    }
+  }, [visible, dpeItem, activeTab]);
+
+  const hasPurchaseInfo = (dpeItem: any): boolean => {
+    // Check if the DPE record has any purchase-related information
+    // This could be a direct purchase field or any indicator that suggests purchase data exists
+    return dpeItem && (
+      dpeItem.purchase !== undefined ||
+      dpeItem.purchase_status !== undefined ||
+      dpeItem.has_purchase !== undefined ||
+      dpeItem.purchase_info !== undefined ||
+      // Add any other purchase-related fields that might exist
+      (typeof dpeItem === 'object' && Object.keys(dpeItem).some(key => 
+        key.toLowerCase().includes('purchase') || 
+        key.toLowerCase().includes('quota')
+      ))
+    );
+  };
+
+  const fetchQuotaStatus = async () => {
+    if (!dpeItem) return;
+    
+    // Check if the DPE record has purchase information before making the API call
+    if (!hasPurchaseInfo(dpeItem)) {
+      // Set a special status to indicate no purchase info available
+      setQuotaStatus({
+        no_purchase_info: true,
+        message: 'No purchase information available for this DPE record',
+        dpe_id: dpeItem.id
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Use the API base URL from environment
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Handle the case where API returns "0" or empty response
+      if (data === 0 || data === "0" || !data) {
+        setQuotaStatus({
+          quota_value: "0",
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Handle structured response with 'res' array (purchase reliability data)
+      if (data.res && Array.isArray(data.res)) {
+        setQuotaStatus({
+          purchase_reliability_data: data.res,
+          total_reliability_records: data.res.length,
+          dpe_id: dpeItem.id,
+          purchase_status: dpeItem.purchase
+        });
+        return;
+      }
+      
+      // Filter table_values to only include items where purchase = 1
+      if (data.table_values && Array.isArray(data.table_values)) {
+        const filteredTableValues = data.table_values.filter((item: any) => item.purchase === 1);
+        const filteredData = {
+          ...data,
+          table_values: filteredTableValues,
+          original_table_values_count: data.table_values.length,
+          filtered_table_values_count: filteredTableValues.length
+        };
+        setQuotaStatus(filteredData);
+      } else {
+        setQuotaStatus({
+          ...data,
+          purchase_status: dpeItem.purchase,
+          api_url: fullUrl
+        });
+      }
+    } catch (error) {
+      message.error('Failed to load quota status');
+      console.error('Error loading quota status:', error);
+      setQuotaStatus({
+        error: true,
+        message: `Failed to load quota status: ${error}`,
+        dpe_id: dpeItem.id,
+        purchase_status: dpeItem.purchase
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!dpeItem?.id) return;
+    
+    setLogsLoading(true);
+    try {
+      // Get API base URL based on environment preference
+      const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
+      const apiBaseUrl = useDevEnvironment 
+        ? (import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr')
+        : (import.meta.env.VITE_API_BASE || 'https://api-stg.etiquettedpe.fr');
+      
+      const apiLogsSuffix = import.meta.env.VITE_API_LOGS_SUFFIX || 'backoffice/get_redis_all_logs';
+      
+      const url = `${apiBaseUrl}/${apiLogsSuffix}`;
+      
+      const searchParams = new URLSearchParams();
+      searchParams.append('ref_ademe', dpeItem.id);
+      
+      // Add env parameter based on which API base URL is being used
+      const envParam = useDevEnvironment ? "dev" : "stg";
+      searchParams.append('env', envParam);
+      
+      const fullUrl = `${url}?${searchParams.toString()}`;
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'cache-control': 'no-cache',
+          'origin': window.location.origin,
+          'pragma': 'no-cache',
+          'referer': window.location.origin + '/',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'cross-site',
+          'user-agent': navigator.userAgent,
+          'x-authorization': 'dperdition'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Handle the actual API response structure
+      setLogsData(data);
+    } catch (error) {
+      message.error('Failed to load logs');
+      console.error('Error loading logs:', error);
+      setLogsData(null);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  const handleEditClick = (key: string, value: any) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setEditModalVisible(true);
+  };
+
+  const handleEditSave = async () => {
+    if (quotaStatus && editingKey) {
+      // Check if this is a reliability record that needs to be updated via PATCH
+      if (editingKey.startsWith('reliability_record_') && editingValue && typeof editingValue === 'object') {
+        try {
+          await updateReliabilityRecord(editingValue);
+          message.success('Reliability record updated successfully');
+        } catch (error) {
+          message.error('Failed to update reliability record');
+          console.error('Error updating reliability record:', error);
+          return; // Don't close modal on error
+        }
+      } else {
+        // Handle other types of edits (local state updates)
+        setQuotaStatus(prev => ({
+          ...prev,
+          [editingKey]: editingValue
+        }));
+        message.success('Value updated successfully');
+      }
+    }
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const updateReliabilityRecord = async (recordData: any) => {
+    if (!dpeItem?.id) {
+      throw new Error('No DPE ID available');
+    }
+
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+    const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'PATCH',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'content-type': 'application/json',
+        'x-authorization': 'dperdition'
+      },
+      body: JSON.stringify({
+        res: [recordData]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const updatedData = await response.json();
+    
+    // Update the local state with the response
+    if (updatedData.res && Array.isArray(updatedData.res)) {
+      setQuotaStatus(prev => ({
+        ...prev,
+        purchase_reliability_data: updatedData.res,
+        total_reliability_records: updatedData.res.length
+      }));
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditModalVisible(false);
+    setEditingKey('');
+    setEditingValue(null);
+  };
+
+  const renderInfosTab = () => {
+    // Create info items array with better structure for quota status
+    const infoItems: InfoItem[] = [];
+    
+    if (quotaStatus) {
+      // Check if this is a "no purchase info" case - don't add any items to the table
+      if (!quotaStatus.no_purchase_info) {
+        // Handle simple quota value case (when API returns "0")
+        if (quotaStatus.quota_value !== undefined) {
+          infoItems.push({
+            key: 'dpe_quota',
+            name: 'DPE Quota',
+            value: quotaStatus.quota_value
+          });
+        }
+        
+        // Handle purchase reliability data (when API returns structured response)
+        if (quotaStatus.purchase_reliability_data && Array.isArray(quotaStatus.purchase_reliability_data)) {
+          // Add each reliability record as a separate editable item
+          quotaStatus.purchase_reliability_data.forEach((record: any, index: number) => {
+            infoItems.push({
+              key: `reliability_record_${index}`,
+              name: `Reliability Record ${index + 1}`,
+              value: {
+                user_email: record.user_email,
+                created_at: record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A',
+                cd_type: record.cd_type,
+                status: record.status,
+                id: record.id // Keep ID for reference
+              }
+            });
+          });
+        }
+        
+        // Add quota status summary for complex responses
+        if (quotaStatus.table_values && Array.isArray(quotaStatus.table_values)) {
+          infoItems.push({
+            key: 'quota_status_summary',
+            name: 'Quota Status Summary',
+            value: {
+              total_items: quotaStatus.table_values.length,
+              purchased_items: quotaStatus.table_values.filter((item: any) => item.purchase === 1).length,
+              original_table_values_count: quotaStatus.original_table_values_count,
+              filtered_table_values_count: quotaStatus.filtered_table_values_count
+            }
+          });
+          
+          // Add individual purchased items if any exist
+          const purchasedItems = quotaStatus.table_values.filter((item: any) => item.purchase === 1);
+          if (purchasedItems.length > 0) {
+            infoItems.push({
+              key: 'purchased_items',
+              name: 'Purchased Items',
+              value: purchasedItems
+            });
+          }
+        }
+        
+        // Add error information if there was an API error
+        if (quotaStatus.error) {
+          infoItems.push({
+            key: 'api_error',
+            name: 'API Error',
+            value: {
+              message: quotaStatus.message,
+              purchase_status: quotaStatus.purchase_status,
+              dpe_id: quotaStatus.dpe_id
+            }
+          });
+        }
+      }
+    }
+
+    const columns = [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+      },
+      {
+        title: 'Value',
+        dataIndex: 'value',
+        key: 'value',
+        render: (value: any, record: InfoItem) => {
+          // Special handling for reliability records
+          if (record.key.startsWith('reliability_record_') && typeof value === 'object') {
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '12px' }}>
+                    <div><strong>Email:</strong> {value.user_email}</div>
+                    <div><strong>Date:</strong> {value.created_at}</div>
+                    <div><strong>Type:</strong> {value.cd_type}</div>
+                    <div><strong>Status:</strong> <Tag color={value.status === 0 ? 'red' : 'green'}>{value.status}</Tag></div>
+                  </div>
+                </div>
+                <Button
+                  type="text"
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => handleEditClick(record.key, value)}
+                />
+              </div>
+            );
+          }
+          
+          // Default rendering for other values
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                {typeof value === 'object' ? (
+                  <pre style={{ 
+                    background: '#f5f5f5', 
+                    padding: 8, 
+                    borderRadius: 4, 
+                    margin: 0,
+                    fontSize: '12px',
+                    maxHeight: 100,
+                    overflow: 'auto'
+                  }}>
+                    {JSON.stringify(value, null, 2)}
+                  </pre>
+                ) : (
+                  <Text>{String(value)}</Text>
+                )}
+              </div>
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                size="small"
+                onClick={() => handleEditClick(record.key, value)}
+              />
+            </div>
+          );
+        },
+      },
+    ];
+
+    return (
+      <div>
+        <Title level={4}>DPE Information</Title>
+        {dpeItem && (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <Text strong>ID:</Text> {dpeItem.id}
+              </div>
+              <div>
+                <Text strong>DPE Rating:</Text> {dpeItem.dpe || 'N/A'}
+              </div>
+              <div>
+                <Text strong>Address:</Text> {dpeItem.address}
+              </div>
+              <div>
+                <Text strong>Handicap:</Text> {dpeItem.handicap}
+              </div>
+              <div>
+                <Text strong>Note:</Text> {dpeItem.note}
+              </div>
+              <div>
+                <Text strong>Last Modified:</Text> {new Date(dpeItem.last_modified).toLocaleString()}
+              </div>
+            </div>
+          </Card>
+        )}
+        
+        <Title level={4}>Infos</Title>
+        <Card>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>Loading quota status...</div>
+            </div>
+          ) : infoItems.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={infoItems}
+              rowKey="key"
+              pagination={false}
+              size="small"
+              showHeader={true}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <Text type="secondary">
+                {quotaStatus?.no_purchase_info 
+                  ? 'No purchase information found in DPE record - API call skipped'
+                  : 'No quota status data available.'
+                }
+              </Text>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const renderWorkflowTab = () => (
+    <div>
+      <Title level={4}>Workflow</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Workflow information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show the workflow status and progression for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderActionsTab = () => (
+    <div>
+      <Title level={4}>Actions</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Available actions will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show available actions for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderDetailsTab = () => (
+    <div>
+      <Title level={4}>Details</Title>
+      <Card>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <Text type="secondary">Detailed information will be displayed here.</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            This tab will show detailed technical information for DPE ID: {dpeItem?.id}
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderLogsTab = () => {
+    const parseLogDetails = (logKey: string) => {
+      if (!logsData?.cd_log) return null;
+      
+      try {
+        // cd_log is already an object, no need to parse JSON
+        const cdLogData = logsData.cd_log;
+        
+        // Extract the actual log type from the key (e.g., "2369E0905921W:stg_middleware_latest_log" -> "stg_middleware_latest_log")
+        const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+        const logDetails = cdLogData[logType];
+        
+        if (Array.isArray(logDetails)) {
+          const parsedItems = logDetails.map((item, index) => {
+            // Parse JSON strings within the array
+            const parsed = typeof item === 'string' ? JSON.parse(item) : item;
+            return { ...parsed, index };
+          });
+          
+          // Sort by timestamp (most recent first) if timestamps are available
+          return parsedItems.sort((a, b) => {
+            const timestampA = a.hr_ts || a.ts;
+            const timestampB = b.hr_ts || b.ts;
+            
+            if (!timestampA || !timestampB) return 0; // Keep original order if no timestamps
+            
+            // Convert to comparable format
+            const dateA = timestampA.includes(':') ? new Date(timestampA) : new Date(timestampA * 1000);
+            const dateB = timestampB.includes(':') ? new Date(timestampB) : new Date(timestampB * 1000);
+            
+            // Most recent first (descending order)
+            return dateB.getTime() - dateA.getTime();
+          });
+        } else if (logDetails) {
+          // Single object - no need to parse, already an object
+          return [logDetails];
+        }
+        return [];
+      } catch (error) {
+        console.error('Error parsing log details:', error);
+        return [];
+      }
+    };
+
+    const renderTimeline = (timers: any) => {
+      if (!timers || typeof timers !== 'object') return null;
+
+      // Convert timers to array and sort by timestamp
+      const timerEntries = Object.entries(timers)
+        .map(([name, timestamp]) => ({
+          name,
+          timestamp: timestamp as number,
+          displayName: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (timerEntries.length === 0) return null;
+
+      // Calculate relative times (first timestamp as baseline)
+      const baseline = timerEntries[0].timestamp;
+      const timelineItems = timerEntries.map((entry, index) => {
+        const relativeTime = entry.timestamp - baseline;
+        const duration = index > 0 ? entry.timestamp - timerEntries[index - 1].timestamp : 0;
+        
+        return {
+          key: entry.name,
+          children: (
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                {entry.displayName}
+              </div>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <Text code>{new Date(entry.timestamp * 1000).toLocaleTimeString()}</Text>
+                {index > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    +{duration.toFixed(3)}s
+                  </Tag>
+                )}
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {relativeTime.toFixed(3)}s from start
+                </Tag>
+              </div>
+            </div>
+          ),
+          dot: <ClockCircleOutlined style={{ color: '#1890ff' }} />
+        };
+      });
+
+      return (
+        <div style={{ marginTop: 8 }}>
+          <Text strong style={{ fontSize: '13px' }}>Execution Timeline:</Text>
+          <Timeline
+            items={timelineItems}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      );
+    };
+
+    const isRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries');
+    };
+
+    const isZeroRetryMessage = (message: string) => {
+      return message && message.includes('after') && message.includes('retries') && message.includes('after 0 retries');
+    };
+
+    const toggleRetryMessages = (logKey: string) => {
+      setShowRetryMessages(prev => ({
+        ...prev,
+        [logKey]: !prev[logKey]
+      }));
+    };
+
+    const renderLogDetails = (logKey: string) => {
+      const details = parseLogDetails(logKey);
+      if (!details || details.length === 0) {
+        return <Text type="secondary">No detailed data available</Text>;
+      }
+
+      // Filter out entire blocks that contain zero retry messages by default
+      const showZeroRetries = showRetryMessages[logKey] || false;
+      
+      // Check if a detail block contains any zero retry messages
+      const blockContainsZeroRetry = (detail: any) => {
+        if (detail.content && Array.isArray(detail.content)) {
+          return detail.content.some((contentItem: any) => 
+            contentItem.message && isZeroRetryMessage(contentItem.message)
+          );
+        }
+        return false;
+      };
+
+      // Filter out entire blocks that contain zero retry messages
+      const filteredDetails = details.filter(detail => {
+        if (blockContainsZeroRetry(detail)) {
+          return showZeroRetries;
+        }
+        return true; // Show blocks that don't contain zero retry messages
+      });
+
+      // Count blocks with zero retry messages for display
+      const zeroRetryCount = details.filter(detail => blockContainsZeroRetry(detail)).length;
+
+      return (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {zeroRetryCount > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, backgroundColor: '#f0f0f0', borderRadius: 4 }}>
+              <Space>
+                <Text type="secondary">
+                  {zeroRetryCount} log entr{zeroRetryCount > 1 ? 'ies' : 'y'} with zero retries hidden
+                </Text>
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => toggleRetryMessages(logKey)}
+                  style={{ padding: 0, height: 'auto' }}
+                >
+                  {showZeroRetries ? 'Hide' : 'Show more'}
+                </Button>
+              </Space>
+            </div>
+          )}
+          {filteredDetails.map((detail, index) => (
+            <Card key={index} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions size="small" column={1}>
+                {detail.hr_ts && (
+                  <Descriptions.Item label="Timestamp">
+                    <Tag color="blue">{detail.hr_ts}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.client_id && (
+                  <Descriptions.Item label="Client ID">
+                    <Text code>{detail.client_id}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.client_ip_hash && (
+                  <Descriptions.Item label="Client IP Hash">
+                    <Text code>{detail.client_ip_hash}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.path && (
+                  <Descriptions.Item label="Path">
+                    <Text code>{detail.path}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.method && (
+                  <Descriptions.Item label="Method">
+                    <Tag color="green">{detail.method}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.time && (
+                  <Descriptions.Item label="Time (ms)">
+                    <Tag color="orange">{detail.time}</Tag>
+                  </Descriptions.Item>
+                )}
+                {detail.uuid && (
+                  <Descriptions.Item label="UUID">
+                    <Text code style={{ fontSize: '11px' }}>{detail.uuid}</Text>
+                  </Descriptions.Item>
+                )}
+                {detail.body && (
+                  <Descriptions.Item label="Body">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}>
+                      {detail.body}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+                {detail.content && (
+                  <Descriptions.Item label="Content Details">
+                    <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                      {Array.isArray(detail.content) ? (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {detail.content.map((contentItem, contentIndex) => (
+                            <Card key={contentIndex} size="small" style={{ backgroundColor: '#fafafa' }}>
+                              <Descriptions size="small" column={1}>
+                                {contentItem.step && (
+                                  <Descriptions.Item label="Step">
+                                    <Tag color="purple">{contentItem.step}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.called_from && (
+                                  <Descriptions.Item label="Called From">
+                                    <Text code>{contentItem.called_from}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.message && (
+                                  <Descriptions.Item label="Message">
+                                    <Text>
+                                      {contentItem.message}
+                                    </Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.ts && (
+                                  <Descriptions.Item label="Timestamp">
+                                    <Tag color="cyan">{new Date(contentItem.ts * 1000).toLocaleString()}</Tag>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.uuid && (
+                                  <Descriptions.Item label="UUID">
+                                    <Text code style={{ fontSize: '10px' }}>{contentItem.uuid}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.path && (
+                                  <Descriptions.Item label="Path">
+                                    <Text code>{contentItem.path}</Text>
+                                  </Descriptions.Item>
+                                )}
+                                {contentItem.timers && (
+                                  <Descriptions.Item label="Execution Timeline">
+                                    {renderTimeline(contentItem.timers)}
+                                  </Descriptions.Item>
+                                )}
+                              </Descriptions>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <pre style={{ 
+                          fontSize: '11px', 
+                          backgroundColor: '#f5f5f5', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {typeof detail.content === 'string' ? detail.content : JSON.stringify(detail.content, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                )}
+                {detail.user_data && (
+                  <Descriptions.Item label="User Data">
+                    <pre style={{ 
+                      fontSize: '11px', 
+                      backgroundColor: '#f5f5f5', 
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      maxHeight: '100px',
+                      overflow: 'auto'
+                    }}>
+                      {JSON.stringify(detail.user_data, null, 2)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          ))}
+        </Space>
+      );
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>
+            Logs 
+            {logsData?.count && (
+              <Text type="secondary" style={{ fontSize: '14px', fontWeight: 'normal', marginLeft: 8 }}>
+                ({logsData.count} entries)
+              </Text>
+            )}
+          </Title>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchLogs}
+            loading={logsLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </div>
+        
+        <Card>
+          {logsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Loading logs...</Text>
+              </div>
+            </div>
+          ) : !logsData || logsData.logs.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No logs found for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Collapse
+              items={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                const details = parseLogDetails(logKey);
+                
+                return {
+                  key: index.toString(),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <div>
+                        <Text code style={{ fontSize: '13px' }}>{logType}</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '11px' }}>Full key: {logKey}</Text>
+                      </div>
+                      <Tag color="blue" style={{ marginLeft: 'auto' }}>
+                        {details?.length || 0} entries
+                      </Tag>
+                    </div>
+                  ),
+                  children: renderLogDetails(logKey),
+                  extra: <EyeOutlined />
+                };
+              })}
+              size="small"
+              ghost
+              defaultActiveKey={logsData.logs.map((logKey, index) => {
+                const logType = logKey.includes(':') ? logKey.split(':')[1] : logKey;
+                return logType.endsWith('_middleware_end_full_log') ? index.toString() : null;
+              }).filter(Boolean)}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'infos',
+      label: 'Infos',
+      children: renderInfosTab(),
+    },
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      children: renderWorkflowTab(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      children: renderActionsTab(),
+    },
+    {
+      key: 'details',
+      label: 'Details',
+      children: renderDetailsTab(),
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      children: renderLogsTab(),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        title={`DPE Details - ${dpeItem?.id || ''}`}
+        open={visible}
+        onCancel={onClose}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          size="large"
+        />
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`Edit ${editingKey}`}
+        open={editModalVisible}
+        onOk={handleEditSave}
+        onCancel={handleEditCancel}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Editing: </Text>
+          <Text code>{editingKey}</Text>
+        </div>
+        <div>
+          <Text strong>Current Value:</Text>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 12, 
+            borderRadius: 6, 
+            marginTop: 8,
+            marginBottom: 16
+          }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>
+              {JSON.stringify(editingValue, null, 2)}
+            </pre>
+          </div>
+        </div>
+        <div>
+          <Text strong>New Value (JSON format):</Text>
+          {editingKey.startsWith('reliability_record_') && (
+            <div style={{ marginTop: 8, marginBottom: 8, padding: 8, backgroundColor: '#e6f7ff', borderRadius: 4 }}>
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                <strong>Status Values:</strong> 0 (inactive), 1 (active), 2 (pending), etc. - Use any integer value.
+                <br />
+                <strong>Note:</strong> Changes will be sent to the server via PATCH request.
+              </Text>
+            </div>
+          )}
+          <Input.TextArea
+            rows={8}
+            placeholder="Enter new value in JSON format..."
+            value={typeof editingValue === 'string' ? editingValue : JSON.stringify(editingValue, null, 2)}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                setEditingValue(parsed);
+              } catch {
+                setEditingValue(e.target.value);
+              }
+            }}
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+```
+
+Let me check for any linting errors:
+
+
+Perfect! Now let me update the todo list to mark the tasks as completed:
+
+
+Excellent! I've implemented the complete status editing functionality with PATCH requests. Here's what I've added:
+
+## ✅ **Status Editing with PATCH Requests**
+
+### **Key Features Implemented:**
+
+1. **✏️ Status Editing**: You can now change the status from 0 to any other integer value (1, 2, 3, etc.)
+
+2. **🔄 PATCH Request**: When you edit a reliability record, it automatically sends a PATCH request to the same endpoint:
+   ```
+   PATCH /backoffice/dpe_quota?ref_ademe={dpe_id}
+   ```
+
+3. **📤 Request Format**: The PATCH request sends the updated data in this format:
+   ```json
+   {
+     "res": [
+       {
+         "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+         "user_email": "germain.blanchet@gmail.com",
+         "created_at": "10/5/2025",
+         "cd_type": "purchase_reliability",
+         "status": 1  // Updated status value
+       }
+     ]
+   }
+   ```
+
+4. **✅ Success/Error Handling**:
+   - **Success**: Shows "Reliability record updated successfully" message
+   - **Error**: Shows "Failed to update reliability record" message and keeps the modal open
+   - **Auto-refresh**: Updates the local state with the server response
+
+5. **💡 User Guidance**: The edit modal now shows helpful information:
+   - Status value examples (0 = inactive, 1 = active, 2 = pending, etc.)
+   - Note that changes will be sent to the server via PATCH request
+
+### **How It Works:**
+
+1. **Click Edit** on any reliability record
+2. **Modify the status** (or any other field) in the JSON editor
+3. **Click OK** to save
+4. **System automatically**:
+   - Sends PATCH request to `/backoffice/dpe_quota?ref_ademe={dpe_id}`
+   - Updates the local state with server response
+   - Shows success/error message
+   - Refreshes the display
+
+### **Example Usage:**
+To change status from 0 to 1:
+```json
+{
+  "user_email": "germain.blanchet@gmail.com",
+  "created_at": "10/5/2025",
+  "cd_type": "purchase_reliability",
+  "status": 1,
+  "id": "59dca1c6-a236-11f0-985f-0a58a9feac02"
+}
+```
+
+The system will automatically send this data via PATCH request and update the server! 🎉
+
+```plaintext
+   PATCH /backoffice/dpe_quota?ref_ademe={dpe_id}
+```
+
+```json
+   {
+     "res": [
+       {
+         "id": "59dca1c6-a236-11f0-985f-0a58a9feac02",
+         "user_email": "germain.blanchet@gmail.com",
+         "created_at": "10/5/2025",
+         "cd_type": "purchase_reliability",
+         "status": 1  // Updated status value
+       }
+     ]
+   }
+```
+
+```json
+{
+  "user_email": "germain.blanchet@gmail.com",
+  "created_at": "10/5/2025",
+  "cd_type": "purchase_reliability",
+  "status": 1,
+  "id": "59dca1c6-a236-11f0-985f-0a58a9feac02"
+}
+```
+
