@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown, InputNumber } from 'antd';
-import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } from '@ant-design/icons';
+import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, WarningOutlined, InfoCircleOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons';
 import { DpeModalProps, QuotaStatus, InfoItem } from './types';
 import cdconfig from '../../../apps/dpes/cdconfig.json';
+import { waitForAccessToken, invalidateTokenCache } from './auth';
 
 const { Title, Text } = Typography;
 
@@ -87,6 +88,15 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
     
     setLoading(true);
+    
+    // Get access token with retry
+    const accessToken = await waitForAccessToken();
+    if (!accessToken) {
+      message.error('Authentication token not found. Please log in again.');
+      setLoading(false);
+      return;
+    }
+    
     try {
       // Use the API base URL from environment
       const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
@@ -96,9 +106,17 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         method: 'GET',
         headers: {
           'accept': 'application/json, text/plain, */*',
+          'authorization': `Bearer ${accessToken}`,
           'x-authorization': 'dperdition'
         }
       });
+
+      if (response.status === 401) {
+        invalidateTokenCache();
+        message.error('Session expired. Please refresh the page and log in again.');
+        setLoading(false);
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -162,6 +180,15 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     if (!dpeItem?.id) return;
     
     setLogsLoading(true);
+    
+    // Get access token with retry
+    const accessToken = await waitForAccessToken();
+    if (!accessToken) {
+      message.error('Authentication token not found. Please log in again.');
+      setLogsLoading(false);
+      return;
+    }
+    
     try {
       // Get API base URL based on environment preference
       const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
@@ -187,6 +214,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         headers: {
           'accept': 'application/json, text/plain, */*',
           'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'authorization': `Bearer ${accessToken}`,
           'cache-control': 'no-cache',
           'origin': window.location.origin,
           'pragma': 'no-cache',
@@ -198,6 +226,12 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
           'x-authorization': 'dperdition'
         }
       });
+
+      if (response.status === 401) {
+        invalidateTokenCache();
+        message.error('Session expired. Please refresh the page and log in again.');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -219,6 +253,15 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     if (!dpeItem?.id) return;
     
     setDetailsLoading(true);
+    
+    // Get access token with retry
+    const accessToken = await waitForAccessToken();
+    if (!accessToken) {
+      message.error('Authentication token not found. Please log in again.');
+      setDetailsLoading(false);
+      return;
+    }
+    
     try {
       // Get API base URL based on environment preference
       const useDevEnvironment = JSON.parse(localStorage.getItem("top-menu-environment-preference") || "true");
@@ -244,6 +287,7 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
         headers: {
           'accept': 'application/json, text/plain, */*',
           'accept-language': 'en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7,la;q=0.6',
+          'authorization': `Bearer ${accessToken}`,
           'cache-control': 'no-cache',
           'origin': window.location.origin,
           'pragma': 'no-cache',
@@ -255,6 +299,12 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
           'x-authorization': 'dperdition'
         }
       });
+
+      if (response.status === 401) {
+        invalidateTokenCache();
+        message.error('Session expired. Please refresh the page and log in again.');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -324,6 +374,12 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
       throw new Error('No DPE ID available');
     }
 
+    // Get access token with retry
+    const accessToken = await waitForAccessToken();
+    if (!accessToken) {
+      throw new Error('Authentication token not found. Please log in again.');
+    }
+
     const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
     const fullUrl = `${apiBaseUrl}/backoffice/dpe_quota?ref_ademe=${dpeItem.id}`;
     
@@ -335,10 +391,16 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
       headers: {
         'accept': 'application/json, text/plain, */*',
         'content-type': 'application/json',
+        'authorization': `Bearer ${accessToken}`,
         'x-authorization': 'dperdition'
       },
       body: JSON.stringify(recordData)
     });
+
+    if (response.status === 401) {
+      invalidateTokenCache();
+      throw new Error('Session expired. Please refresh the page and log in again.');
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -594,20 +656,124 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     </div>
   );
 
-  const renderActionsTab = () => (
-    <div>
-      <Title level={4}>Actions</Title>
-      <Card>
-        <div style={{ padding: 20, textAlign: 'center' }}>
-          <Text type="secondary">Available actions will be displayed here.</Text>
-          <br />
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            This tab will show available actions for DPE ID: {dpeItem?.id}
-          </Text>
-        </div>
-      </Card>
-    </div>
-  );
+  const handleActionClick = async (actionKey: string, actionConfig: any) => {
+    if (!dpeItem?.id) {
+      message.error('No DPE ID available');
+      return;
+    }
+
+    // Get access token with retry
+    const accessToken = await waitForAccessToken();
+    if (!accessToken) {
+      message.error('Authentication token not found. Please log in again.');
+      return;
+    }
+
+    try {
+      // Get API base URL
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_DEV || 'https://api-dev.etiquettedpe.fr';
+      
+      // Get endpoint from config
+      const endpoint = cdconfig?.endpoints?.tasks?.url || '/backoffice/send_task';
+      const fullUrl = `${apiBaseUrl}${endpoint}`;
+      
+      // Prepare request body
+      const requestBody = {
+        task_name: actionConfig.task_name,
+        payload: {
+          ref_ademe: dpeItem.id
+        }
+      };
+
+      message.loading({ content: `Executing ${actionKey}...`, key: actionKey });
+      
+      const response = await fetch(fullUrl, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'content-type': 'application/json',
+          'authorization': `Bearer ${accessToken}`,
+          'x-authorization': 'dperdition'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (response.status === 401) {
+        invalidateTokenCache();
+        message.error({ content: 'Session expired. Please refresh the page and log in again.', key: actionKey, duration: 5 });
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      message.success({ content: `Action "${actionKey}" executed successfully`, key: actionKey, duration: 3 });
+      console.log('Action response:', data);
+    } catch (error) {
+      message.error({ content: `Failed to execute action "${actionKey}": ${error}`, key: actionKey, duration: 5 });
+      console.error(`Error executing action ${actionKey}:`, error);
+    }
+  };
+
+  // Helper function to get icon component from icon name string
+  const getIconComponent = (iconName: string | undefined) => {
+    if (!iconName) return null;
+    
+    const iconMap: Record<string, React.ReactNode> = {
+      'DeleteOutlined': <DeleteOutlined />,
+      'ReloadOutlined': <ReloadOutlined />,
+      'CheckOutlined': <CheckOutlined />,
+      'CloseOutlined': <CloseOutlined />,
+      'WarningOutlined': <WarningOutlined />,
+      'InfoCircleOutlined': <InfoCircleOutlined />,
+      'EditOutlined': <EditOutlined />,
+      'EyeOutlined': <EyeOutlined />,
+      'FilePdfOutlined': <FilePdfOutlined />,
+      'DownloadOutlined': <DownloadOutlined />,
+    };
+    
+    return iconMap[iconName] || null;
+  };
+
+  const renderActionsTab = () => {
+    const actions = cdconfig?.actions || {};
+    const actionEntries = Object.entries(actions);
+
+    // Filter actions based on visibility (for now using "all" property)
+    const visibleActions = actionEntries.filter(([key, actionConfig]: [string, any]) => {
+      const visibility = actionConfig?.visibility;
+      return visibility && visibility.all === true;
+    });
+
+    return (
+      <div>
+        <Title level={4}>Actions</Title>
+        <Card>
+          {visibleActions.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <Text type="secondary">No actions available for DPE ID: {dpeItem?.id}</Text>
+            </div>
+          ) : (
+            <Space direction="horizontal" style={{ width: '100%', flexWrap: 'wrap' }} size="middle">
+              {visibleActions.map(([actionKey, actionConfig]: [string, any]) => (
+                <Button
+                  key={actionKey}
+                  icon={getIconComponent(actionConfig.icon)}
+                  onClick={() => handleActionClick(actionKey, actionConfig)}
+                  title={actionConfig.tooltip || ''}
+                  size="small"
+                >
+                  {actionKey.charAt(0).toUpperCase() + actionKey.slice(1)}
+                </Button>
+              ))}
+            </Space>
+          )}
+        </Card>
+      </div>
+    );
+  };
 
   const renderDetailsTab = () => {
     const parseDetailsData = (logKey: string) => {

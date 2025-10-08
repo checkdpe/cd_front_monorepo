@@ -1,4 +1,7 @@
 {
+    "endpoints":{
+        "tasks": {"url":"/backoffice/send_task"}
+    },
     "labels": {
         "timers_step_label": {
             "attach_db_redis": "Connect to DB",
@@ -36,7 +39,29 @@
     },
     "actions":{
         "delete": {
-            "task_name":"status_manage.delete",
+            "task_name":"tasks.utils.delete_status",
+            "icon":"DeleteOutlined",
+            "tooltip":"Delete the status manage",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        },
+        "summary_init":{
+            "task_name":"tasks.document_processing.create",
+            "icon": "FilePdfOutlined",
+            "tooltip":"Initialize the ai-summary",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        },
+        "load_dpe":{
+            "task_name":"tasks.xml_processing.ingest",
+            "icon":"DownloadOutlined",
+            "tooltip":"Load the dpe, via running successive tasks : insertion, bdnb, reliability...",
             "visibility":{
                 "all": true,
                 "admin": true
