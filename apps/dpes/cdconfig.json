@@ -67,6 +67,26 @@
                 "admin": true
             },
             "params":[]
+        },
+        "to_o3cl_full":{
+            "task_name":"tasks.xml_processing.to_o3cl_full",
+            "icon":"CloudDownloadOutlined",
+            "tooltip":"Writes the full DPE to the expected o3cl format in MongoDB",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
+        },
+        "o3cl_init":{
+            "task_name":"tasks.ext_o3cl_managing.ademe_run",
+            "icon":"CloudDownloadOutlined",
+            "tooltip":"Run the o3cl",
+            "visibility":{
+                "all": true,
+                "admin": true
+            },
+            "params":[]
         }
     }
 }

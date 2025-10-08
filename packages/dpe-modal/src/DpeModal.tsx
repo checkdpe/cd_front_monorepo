@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Tabs, Card, Spin, message, Typography, Table, Button, Input, Tag, Space, Collapse, Descriptions, Divider, Timeline, Dropdown, InputNumber } from 'antd';
-import { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, WarningOutlined, InfoCircleOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons';
+import * as Icons from '@ant-design/icons';
 import { DpeModalProps, QuotaStatus, InfoItem } from './types';
 import cdconfig from '../../../apps/dpes/cdconfig.json';
 import { waitForAccessToken, invalidateTokenCache } from './auth';
 
 const { Title, Text } = Typography;
+const { EditOutlined, ReloadOutlined, EyeOutlined, ClockCircleOutlined, MenuOutlined, LinkOutlined } = Icons;
 
 export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem }) => {
   const [activeTab, setActiveTab] = useState('infos');
@@ -717,24 +718,19 @@ export const DpeModal: React.FC<DpeModalProps> = ({ visible, onClose, dpeItem })
     }
   };
 
-  // Helper function to get icon component from icon name string
+  // Helper function to get icon component dynamically from icon name string
   const getIconComponent = (iconName: string | undefined) => {
     if (!iconName) return null;
     
-    const iconMap: Record<string, React.ReactNode> = {
-      'DeleteOutlined': <DeleteOutlined />,
-      'ReloadOutlined': <ReloadOutlined />,
-      'CheckOutlined': <CheckOutlined />,
-      'CloseOutlined': <CloseOutlined />,
-      'WarningOutlined': <WarningOutlined />,
-      'InfoCircleOutlined': <InfoCircleOutlined />,
-      'EditOutlined': <EditOutlined />,
-      'EyeOutlined': <EyeOutlined />,
-      'FilePdfOutlined': <FilePdfOutlined />,
-      'DownloadOutlined': <DownloadOutlined />,
-    };
+    // Dynamically get the icon component from the Icons object
+    const IconComponent = (Icons as any)[iconName];
     
-    return iconMap[iconName] || null;
+    if (!IconComponent) {
+      console.warn(`Icon "${iconName}" not found in @ant-design/icons`);
+      return null;
+    }
+    
+    return <IconComponent />;
   };
 
   const renderActionsTab = () => {
