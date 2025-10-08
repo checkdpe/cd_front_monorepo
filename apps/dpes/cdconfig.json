@@ -74,7 +74,7 @@
             "icon":"CloudDownloadOutlined",
             "tooltip":"xml_processing.to_o3cl_full: Writes the full DPE to the expected o3cl format in MongoDB",
             "visibility":{
-                "all": true,
+                "all": false,
                 "admin": true
             },
             "params":[]
@@ -83,6 +83,21 @@
             "task_name":"tasks.ext_o3cl_managing.ademe_run",
             "icon":"CloudDownloadOutlined",
             "tooltip":"ext_o3cl_managing.ademe_run: Run the o3cl",
+            "visibility":{
+                "all": false,
+                "admin": true
+            },
+            "params":[],
+            "done":{
+                "data_source":"redis_details",
+                "key_suffix": "report_o3cl",
+                "report_short": ["data.logement.sortie.ep_conso"]
+            }
+        },
+        "post_process":{
+            "task_name":"tasks.end_processing.process",
+            "icon":"CloudDownloadOutlined",
+            "tooltip":"ext_o3cl_managing.ademe_run: Run the o3cl, after copy to mongo",
             "visibility":{
                 "all": true,
                 "admin": true
