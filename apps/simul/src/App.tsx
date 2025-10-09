@@ -979,37 +979,6 @@ export const App: React.FC = () => {
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <Title level={2} style={{ color: "#0b0c0f", margin: 0 }}>Simulation</Title>
               <Button type="primary" size="large" icon={<LeftOutlined />} onClick={openEditor} disabled={isEditorOpen}>Edit</Button>
-              <Button 
-                onClick={() => {
-                  try {
-                    const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-                    const runsWithForcedInputs = Array.isArray(parsed) ? parsed.map((run: any) => {
-                      const forced = run?.parameters?.input_forced || {};
-                      const scenarios = Array.isArray(run?.scenarios) ? run.scenarios : [];
-                      
-                      if (!forced || typeof forced !== "object" || Object.keys(forced).length === 0) {
-                        return run;
-                      }
-                      
-                      const nextScenarios = scenarios.map((sc: any) => {
-                        if (!sc || typeof sc !== "object") return sc;
-                        const baseInput = (sc.input && typeof sc.input === "object") ? sc.input : {};
-                        const mergedInput = { ...baseInput, ...forced };
-                        return { ...sc, input: mergedInput };
-                      });
-                      
-                      return { ...run, scenarios: nextScenarios };
-                    }) : parsed;
-                    
-                    setJsonText(JSON.stringify(runsWithForcedInputs, null, 2));
-                    message.success("Forced inputs applied to scenarios");
-                  } catch (err) {
-                    message.error("Failed to apply forced inputs");
-                  }
-                }}
-              >
-                Apply Forced Inputs
-              </Button>
             </div>
             <Button onClick={() => setIsChainlitOpen(true)}>build with AI</Button>
           </div>
