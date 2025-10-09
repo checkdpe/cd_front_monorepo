@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./amplify";
 import { authorizedFetch, waitForAccessToken, getAccessToken, setBridgeAccessToken } from "./auth";
+import { SessionBridge } from "./SessionBridge";
 import { Hub } from "aws-amplify/utils";
 import { Button, Card, Col, Flex, Input, InputNumber, Row, Select, Space, Typography, message, Spin, Collapse, Tooltip, Switch } from "antd";
 import { ExportOutlined, LeftOutlined } from "@ant-design/icons";
@@ -17,7 +18,7 @@ import { SimulationDetailCard } from "@acme/simulation-detail";
 const { Title, Paragraph } = Typography;
 
 export const App: React.FC = () => {
-  const [jsonText, setJsonText] = useState<string>("{\n  \"items\": []\n}");
+  const [jsonText, setJsonText] = useState<string>("[]");
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const [apiDebug, setApiDebug] = useState<number | undefined>(undefined);
   const [skip, setSkip] = useState<number>(1);
@@ -101,29 +102,20 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     let isCancelled = false;
-    // Listen to session bridge messages from auth app
-    function onMessage(ev: MessageEvent) {
-      try {
-        const payload = ev.data;
-        if (!payload || payload.type !== "cognito-session-bridge") return;
-        const authOrigin = payload?.data?.authOrigin as string | undefined;
-        // Optionally validate origin
-        if (authOrigin && !ev.origin.startsWith(authOrigin)) {
-          // origin mismatch – ignore
-          return;
-        }
+    
+    // Listen for authentication events from other apps
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "auth.bridge.ready") {
         setBridgeReady(true);
-        const isAuthenticated = Boolean(payload?.data?.isAuthenticated);
-        const tokenFromBridge = (payload?.data?.accessToken as string | undefined) || undefined;
-        if (tokenFromBridge) setBridgeAccessToken(tokenFromBridge);
-        if (isAuthenticated) setBridgeAuthenticated(true);
-        const emailFromBridge = (payload?.data?.email as string | undefined) || (payload?.data?.username as string | undefined);
-        if (!isCancelled && emailFromBridge) {
-          setUserEmail((prev) => prev || emailFromBridge);
+        setBridgeAuthenticated(Boolean(event.data.authenticated));
+        if (event.data.userEmail && !isCancelled) {
+          setUserEmail(event.data.userEmail);
         }
-      } catch {}
-    }
-    window.addEventListener("message", onMessage);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
     
     (async () => {
       try {
@@ -216,7 +208,7 @@ export const App: React.FC = () => {
     })();
     return () => {
       isCancelled = true;
-      window.removeEventListener("message", onMessage);
+      window.removeEventListener("message", handleMessage);
     };
   }, []);
 
@@ -301,8 +293,8 @@ export const App: React.FC = () => {
             const mergedInput = { ...forced, ...baseInput };
             return { ...sc, input: mergedInput };
           });
-          const { parameters, ...rest } = run || {};
-          return { ...rest, scenarios: nextScenarios };
+          // Keep the parameters object so DpeDrawerEditor can read input_forced
+          return { ...run, scenarios: nextScenarios };
         });
 
         if (transformedRuns.length > 0) {
@@ -466,51 +458,6 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // If no Cognito token becomes available shortly after load, redirect to sign-in
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = await waitForAccessToken(5000, 250);
-        if (cancelled) return;
-        if (token) return; // already authenticated
-        // Compute auth URL similarly to TopMenu.authHref
-        const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
-        const buildAuthBase = () => {
-          if (configured) {
-            try {
-              const configuredUrl = new URL(configured);
-              const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
-              const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-              if (isConfiguredLocal && !isPageLocal) {
-                // ignore local auth URL on non-localhost pages
-              } else {
-                if (!isConfiguredLocal) {
-                  const pathname = configuredUrl.pathname || "/";
-                  const endsWithHtml = /\.html$/i.test(pathname);
-                  const hasTrailingSlash = /\/$/.test(pathname);
-                  if (!endsWithHtml) {
-                    const base = hasTrailingSlash ? configured.replace(/\/$/, "") : configured;
-                    return base + "/index.html";
-                  }
-                }
-                return configured;
-              }
-            } catch {
-              return configured;
-            }
-          }
-          if (window.location.hostname === "localhost") return "http://localhost:5173";
-          return "/auth/index.html";
-        };
-        const authBase = buildAuthBase();
-        const sep = authBase.includes("?") ? "&" : "?";
-        const target = `${authBase}${sep}returnTo=${encodeURIComponent(window.location.href)}`;
-        window.location.href = target;
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   // Capture the JSON snapshot when opening the editor to detect unconfirmed changes
   useEffect(() => {
@@ -751,10 +698,32 @@ export const App: React.FC = () => {
   async function handleSubmit() {
     try {
       const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
+      
+      // Automatically merge forced inputs from parameters.input_forced into each scenario
+      const runsWithForcedInputs = Array.isArray(parsed) ? parsed.map((run: any) => {
+        const forced = run?.parameters?.input_forced || {};
+        const scenarios = Array.isArray(run?.scenarios) ? run.scenarios : [];
+        
+        // If no forced inputs, return run as-is
+        if (!forced || typeof forced !== "object" || Object.keys(forced).length === 0) {
+          return run;
+        }
+        
+        // Merge forced inputs into each scenario's input
+        const nextScenarios = scenarios.map((sc: any) => {
+          if (!sc || typeof sc !== "object") return sc;
+          const baseInput = (sc.input && typeof sc.input === "object") ? sc.input : {};
+          const mergedInput = { ...baseInput, ...forced };
+          return { ...sc, input: mergedInput };
+        });
+        
+        return { ...run, scenarios: nextScenarios };
+      }) : parsed;
+      
       const baseQuery: Record<string, unknown> = { ref_ademe: refAdeme };
       if (expertMode && apiDebug != null) baseQuery.api_debug = Boolean(apiDebug);
       if (expertMode) { baseQuery.skip = skip; baseQuery.limit = limit; }
-      const query = { ...baseQuery, runs: parsed } as Record<string, unknown>;
+      const query = { ...baseQuery, runs: runsWithForcedInputs } as Record<string, unknown>;
       const lambdaUrl = (import.meta.env.VITE_SIMULATION_LAMBDA_URL as string) || "https://6vyebgqw4plhmxrewmsgh6yere0bwpos.lambda-url.eu-west-3.on.aws/";
       const nbCombinationsToSend = Number(((overrideCombinations != null) ? overrideCombinations : totalCombinations) || 0);
       const body = {
@@ -923,31 +892,14 @@ export const App: React.FC = () => {
       {/* Invisible iframe to pull session from auth origin when on different ports */}
       {!bridgeReady && (
         <iframe
-          src={(() => {
-            const configured = import.meta.env.VITE_AUTH_URL as string | undefined;
-            if (configured) {
-              try {
-                const configuredUrl = new URL(configured);
-                const isConfiguredLocal = ["localhost", "127.0.0.1"].includes(configuredUrl.hostname);
-                const isPageLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-                if (!(isConfiguredLocal && !isPageLocal)) {
-                  const pathname = configuredUrl.pathname || "/";
-                  const endsWithHtml = /\.html$/i.test(pathname);
-                  const hasTrailingSlash = /\/$/.test(pathname);
-                  const base = endsWithHtml ? configured : (hasTrailingSlash ? configured.replace(/\/$/, "") + "/index.html" : configured + "/index.html");
-                  return base;
-                }
-              } catch {
-                return configured.replace(/\/$/, "") + "/index.html";
-              }
-            }
-            if (window.location.hostname === "localhost") return "http://localhost:5173/index.html";
-            return "/auth/index.html";
-          })()}
-          style={{ display: "none" }}
-          title="session-bridge"
+          src={`${import.meta.env.VITE_AUTH_URL || "/auth"}?bridge=true`}
+          style={{ position: "fixed", inset: 0, opacity: 0, pointerEvents: "none", zIndex: -1 }}
+          title="Auth Bridge"
         />
       )}
+      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", opacity: 0 }}>
+        <SessionBridge />
+      </div>
       <div style={{ padding: 24 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
         {isEditorOpen ? (

@@ -8,7 +8,7 @@ export function setBridgeAccessToken(token: string | null) {
 export async function getAccessToken(): Promise<string | null> {
   if (bridgeToken) return bridgeToken;
   try {
-    const session = await fetchAuthSession({ forceRefresh: true } as any);
+    const session = await fetchAuthSession();
     const token = session?.tokens?.accessToken?.toString();
     if (token) return token;
   } catch {

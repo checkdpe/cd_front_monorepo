@@ -11,7 +11,7 @@ export async function getAccessToken(): Promise<string | null> {
   }
   
   try {
-    const session = await fetchAuthSession({ forceRefresh: true } as any);
+    const session = await fetchAuthSession();
     const token = session?.tokens?.accessToken?.toString();
     if (token) {
       return token;

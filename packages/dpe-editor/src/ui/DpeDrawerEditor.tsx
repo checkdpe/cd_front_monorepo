@@ -468,16 +468,41 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
               const incFromState = Number(pLocal.increments[targetIndex] ?? NaN);
               const incVal = Number.isFinite(incFromState) ? incFromState : (Number.isFinite(templateInc) ? templateInc : 0);
               nextSc.input[configuredInputKey] = { set: incVal };
-              const forcedText = forcedInputs[v.id] || "";
+              
+              // Apply forced inputs from template or state
               try {
-                const forcedObj = forcedText.trim() ? JSON.parse(forcedText) : {};
+                let forcedObj: any = null;
+                
+                // First try to get from forcedInputs state
+                const forcedText = forcedInputs[v.id] || "";
+                if (forcedText.trim()) {
+                  try {
+                    forcedObj = JSON.parse(forcedText);
+                  } catch {}
+                }
+                
+                // Fallback to template if not in state
+                if (!forcedObj || typeof forcedObj !== "object" || Object.keys(forcedObj).length === 0) {
+                  const templateEntry = templateRuns.find((r) => r && r.elements_variant === v.id);
+                  if (templateEntry?.parameters?.input_forced) {
+                    forcedObj = templateEntry.parameters.input_forced;
+                    console.log("[DpeDrawerEditor] Applying forced inputs from template for", v.id, ":", forcedObj);
+                  }
+                }
+                
+                // Apply forced inputs to scenario
                 if (forcedObj && typeof forcedObj === "object") {
+                  const keysToApply = Object.keys(forcedObj).filter(fk => fk !== configuredInputKey);
+                  console.log("[DpeDrawerEditor] Merging forced input keys:", keysToApply);
                   Object.entries(forcedObj).forEach(([fk, fv]) => {
                     if (fk === configuredInputKey) return;
-                    if (nextSc.input[fk] == null) nextSc.input[fk] = fv;
+                    // Always apply forced inputs, overwriting existing values
+                    nextSc.input[fk] = fv;
                   });
                 }
-              } catch {}
+              } catch (err) {
+                console.error("[DpeDrawerEditor] Error applying forced inputs:", err);
+              }
               const templatePriceVar = Number(templateDerived[v.id]?.priceVar?.[idx] ?? NaN);
               const priceVarFromState = Number(pLocal.priceVar[targetIndex] ?? NaN);
               const priceVarVal = Number.isFinite(priceVarFromState) ? priceVarFromState : (Number.isFinite(templatePriceVar) ? templatePriceVar : 0);
@@ -934,7 +959,8 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
           if (forcedObj && typeof forcedObj === "object") {
             Object.entries(forcedObj).forEach(([fk, fv]) => {
               if (fk === configuredInputKey) return;
-              if (nextSc.input[fk] == null) nextSc.input[fk] = fv;
+              // Always apply forced inputs, overwriting existing values
+              nextSc.input[fk] = fv;
             });
           }
         } catch {}
@@ -1247,7 +1273,41 @@ export const DpeDrawerEditor: React.FC<DpeDrawerEditorProps> = ({ open, onClose,
                   <div style={{ color: "#4b5563", fontSize: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span>Increment</span>
-                      <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => setColSettings({ open: true, variant: v.id, field: "increments", tempUnit: pricing[v.id]?.incrementUnit || "cm", tempKey: mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "", tempForcedInputs: forcedInputs[v.id] || "{\n}\n" })} />
+                      <Button size="small" type="text" icon={<span aria-hidden="true">⚙️</span>} onClick={() => {
+                        // Read forced inputs from template API data (templateRuns state)
+                        let forcedText = "";
+                        try {
+                          console.log("[DpeDrawerEditor] Opening column settings for variant:", v.id);
+                          console.log("[DpeDrawerEditor] templateRuns count:", templateRuns.length);
+                          
+                          // First try to get from template (fetched from API)
+                          const templateEntry = templateRuns.find((r) => r && r.elements_variant === v.id);
+                          console.log("[DpeDrawerEditor] Template entry found:", templateEntry ? "yes" : "no");
+                          console.log("[DpeDrawerEditor] Template parameters:", templateEntry?.parameters);
+                          
+                          let forced = templateEntry?.parameters?.input_forced;
+                          
+                          // Fallback to current JSON if template doesn't have it
+                          if (!forced || typeof forced !== "object" || Object.keys(forced).length === 0) {
+                            console.log("[DpeDrawerEditor] No forced inputs in template, checking rootJsonText");
+                            const parsed = rootJsonText.trim() ? JSON.parse(rootJsonText) : [];
+                            const runs: any[] = Array.isArray(parsed) ? parsed : [];
+                            const entry = runs.find((r) => r && r.elements_variant === v.id);
+                            forced = entry?.parameters?.input_forced;
+                          }
+                          
+                          console.log("[DpeDrawerEditor] Final forced inputs:", forced);
+                          if (forced && typeof forced === "object" && Object.keys(forced).length > 0) {
+                            forcedText = JSON.stringify(forced, null, 2) + "\n";
+                            console.log("[DpeDrawerEditor] Setting forcedText:", forcedText);
+                          } else {
+                            console.log("[DpeDrawerEditor] No valid forced inputs found");
+                          }
+                        } catch (err) {
+                          console.error("[DpeDrawerEditor] Failed to parse forced inputs:", err);
+                        }
+                        setColSettings({ open: true, variant: v.id, field: "increments", tempUnit: pricing[v.id]?.incrementUnit || "cm", tempKey: mappingKeys[v.id]?.inputKey || getTemplateScenarioInputKey(v.id) || getFirstScenarioInputKey(v.id) || "", tempForcedInputs: forcedText || "{\n}\n" });
+                      }} />
                     </div>
                     <div style={{ color: "#9ca3af" }}>{pricing[v.id]?.incrementUnit || "cm"}</div>
                   </div>
